@@ -1,0 +1,49 @@
+windninja_exe: ~/.wind3d-ninja/windninja/3.12.2/bin/WindNinja_cli.exe
+
+sources:
+  windmaster:
+    tz_offset_hours: 8
+    station_prefix: WM
+    max_height_m: 200
+    min_obtain_rate: 0.8
+  dat:
+    tz_offset_hours: 8
+    station_prefix: DAT
+    max_height_m: 200
+    speed_divisor: 100
+  uav:
+    tz_offset_hours: 8
+    station_prefix: UAV
+    agl_threshold_drop_m: -4.0
+    agl_threshold_fix_m: 0.1
+    max_height_m: 1000
+
+quality_rules:
+  windmaster:
+    preferred_heights_m: [113]
+    max_time_offset_seconds: 120
+  dat:
+    preferred_heights_m: [10]
+    max_time_offset_seconds: 120
+
+dem:
+  cache_dir: ~/.wind3d-ninja/dem_cache
+  source: srtm
+
+temperature:
+  trust_source: false
+  valid_range_c: [-40.0, 50.0]
+  configured_assumption_c: 20.0
+  cloud_cover_assumption_pct: 0.0
+
+windninja:
+  default_mesh_resolution_m: 200
+  default_buffer_km: 10.0
+  vegetation: trees
+  num_threads: 4
+
+output:
+  default_output_dir_name: wind3d_output
+  netcdf_compression: true
+  netcdf_naming_format: "Wind3D_{time}_{resolution}m_h{height:03d}m.nc"
+  kmz_colormap: viridis

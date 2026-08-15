@@ -1,0 +1,34 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.env
+.env.*
+!.env.example
+build/
+dist/
+*.egg-info/
+wind3d_output/
+qa_output/
+output/
+windninja_run/
+PROGRESS.md
+
+# Local observations, terrain, model intermediates, and binary products
+data/
+input_data/
+examples/input_data/
+*.zip
+*.dat
+*.xls
+*.xlsx
+*.tif
+*.tiff
+*.asc
+*.prj
+*.nc
+*.kmz
+*.log
+
+# WindNinja runtime binaries are managed by doctor --install outside the repository
+vendor/windninja/bin/*.exe
