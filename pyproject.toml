@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wind3d-ninja"
-version = "0.1.0"
+version = "0.1.1"
 description = "WindNinja-based multi-source wind-field downscaling CLI"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.1 - 2026-08-16
+
+- Fixed duplicate station files caused by the +/-120-second selection window; each WindNinja station now contributes only its nearest record for a target time.
+
 ## v0.1.0 - 2026-08-15
 
 Initial fixed release of `wind3d-ninja`.

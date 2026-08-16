@@ -57,11 +57,32 @@ def test_selector_uses_source_time_offset_window() -> None:
         datetime(2024, 4, 3, 8, 16, tzinfo=timezone.utc),
         values,
     )
-    assert {(item.time_utc.minute, item.time_utc.second) for item in selected} == {
-        (14, 0),
-        (16, 30),
-        (18, 0),
-    }
+    assert [(item.time_utc.minute, item.time_utc.second) for item in selected] == [(16, 30)]
+
+
+def test_selector_keeps_one_nearest_record_per_station() -> None:
+    values = [
+        observation("windmaster", 113, 16, 0),
+        observation("windmaster", 113, 16, 30),
+        observation("dat", 10, 15, 0),
+        observation("dat", 10, 16, 59),
+    ]
+    selector = ObservationSelector(
+        {
+            "windmaster": QualityRule((113,), 120),
+            "dat": QualityRule((10,), 120),
+        }
+    )
+
+    selected = selector.select_for_time(
+        datetime(2024, 4, 3, 8, 16, tzinfo=timezone.utc),
+        values,
+    )
+
+    assert [(item.source, item.time_utc.minute, item.time_utc.second) for item in selected] == [
+        ("dat", 16, 59),
+        ("windmaster", 16, 0),
+    ]
 
 
 def test_selector_without_window_matches_the_same_minute() -> None:

@@ -46,5 +46,16 @@ class ObservationSelector:
                 ]
                 if preferred:
                     source_items = preferred
-            selected.extend(source_items)
+            # WindNinja's Recent_Station_File_List requires one file per
+            # unique Station_Name.  A source may have several records inside
+            # the time window, so keep the nearest record for each station.
+            nearest_by_station: dict[str, tuple[float, datetime, float, Observation]] = {}
+            for item in source_items:
+                item_time = TimeAxis.to_utc(item.time_utc)
+                distance_seconds = abs((item_time - target).total_seconds())
+                candidate = (distance_seconds, item_time, item.height_m, item)
+                previous = nearest_by_station.get(item.station)
+                if previous is None or candidate[:3] < previous[:3]:
+                    nearest_by_station[item.station] = candidate
+            selected.extend(candidate[3] for candidate in nearest_by_station.values())
         return sorted(selected, key=lambda item: (item.source, item.station, item.height_m))

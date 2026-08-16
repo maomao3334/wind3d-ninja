@@ -189,7 +189,7 @@ UAV 高度严格使用上面的 GPS、对地高度和 DEM 算法。
 
 ## 版本与许可证
 
-当前固定版本为 `v0.1.0`。本项目使用 MIT License；WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
+当前固定版本为 `v0.1.1`。本项目使用 MIT License；WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
 
 ## Legacy 10 m converter
 
