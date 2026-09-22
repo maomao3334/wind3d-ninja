@@ -5,6 +5,14 @@ __pycache__/
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret
+*.token
+credentials*.json
+service-account*.json
 build/
 dist/
 *.egg-info/
@@ -32,3 +40,15 @@ examples/input_data/
 
 # WindNinja runtime binaries are managed by doctor --install outside the repository
 vendor/windninja/bin/*.exe
+
+# Local Windows packaging workspaces and generated release bundles
+.build-venv/
+installer_build/
+installer_dist/
+installer_output/
+installer_stage/
+dist_final/
+dist_ui/
+release/
+release_dllfix/
+release_final/

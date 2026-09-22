@@ -36,8 +36,9 @@ def safe_station_name(value: str) -> str:
 
 
 class StationFileWriter:
-    def __init__(self, temperature: TemperatureConfig):
+    def __init__(self, temperature: TemperatureConfig, radius_of_influence_km: float = -1.0):
         self.temperature = temperature
+        self.radius_of_influence_km = radius_of_influence_km
 
     def row(
         self,
@@ -69,7 +70,7 @@ class StationFileWriter:
             f"{temperature:.1f}",
             "C",
             f"{self.temperature.cloud_cover_assumption_pct:.1f}",
-            "-1",
+            f"{self.radius_of_influence_km:g}",
             "km",
             TimeAxis.format_time_for_station(target_time) if include_datetime else "",
         ]

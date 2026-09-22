@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from ..config.models import AppConfig
 from ..dem.manager import DemManager
@@ -44,9 +44,10 @@ class PipelineRunResult:
 
 
 class PipelineRunner:
-    def __init__(self, config: AppConfig, windninja_runner: WindNinjaRunner | None = None):
+    def __init__(self, config: AppConfig, windninja_runner: WindNinjaRunner | None = None, progress_callback: Callable[[str], None] | None = None):
         self.config = config
         self.windninja_runner = windninja_runner or WindNinjaRunner(config.windninja_exe)
+        self.progress_callback = progress_callback
 
     def run(
         self,
@@ -179,7 +180,10 @@ class PipelineRunner:
                     manifest.add_input(Path(value), kind)
             manifest.add_input(dem_path, "dem_used")
             selector = ObservationSelector(self.config.quality_rules)
-            station_writer = StationFileWriter(self.config.temperature)
+            station_writer = StationFileWriter(
+                self.config.temperature,
+                self.config.windninja.station_radius_of_influence_km,
+            )
             station_list_writer = StationListWriter()
             config_writer = WindNinjaConfigWriter()
             netcdf_writer = Wind3DNetcdfWriter(self.config.output.netcdf_compression)
@@ -191,6 +195,11 @@ class PipelineRunner:
                 selected = selector.select_for_time(target_time, observations)
                 if not selected:
                     continue
+                selected_heights = sorted({observation.height_m for observation in selected})
+                self._progress(
+                    f"[wind3d] {target_time:%Y-%m-%dT%H:%M:%SZ} | "
+                    f"using {len(selected)} observations across heights={selected_heights}"
+                )
                 time_key = TimeAxis.format_time_for_filename(target_time)
                 for height in output_heights:
                     height_key = f"h{height:03d}m"
@@ -243,6 +252,12 @@ class PipelineRunner:
                             self.config.windninja.vegetation,
                             self.config.windninja.num_threads,
                             generate_kmz,
+                            diurnal_winds=self.config.windninja.diurnal_winds,
+                            non_neutral_stability=self.config.windninja.non_neutral_stability,
+                            alpha_stability=self.config.windninja.alpha_stability,
+                            input_wind_height_m=self.config.windninja.input_wind_height_m,
+                            output_buffer_clipping_pct=self.config.windninja.output_buffer_clipping_pct,
+                            turbulence_output=self.config.windninja.turbulence_output,
                         )
                         wind_result = self.windninja_runner.run(config_file, work_dir)
                         self._progress(f"{run_label} | WindNinja complete; writing NetCDF")
@@ -303,9 +318,10 @@ class PipelineRunner:
             manifest.write()
             raise
 
-    @staticmethod
-    def _progress(message: str) -> None:
+    def _progress(self, message: str) -> None:
         print(message, file=sys.stderr, flush=True)
+        if self.progress_callback is not None:
+            self.progress_callback(message)
 
     @staticmethod
     def _write_observations(observations: Iterable[Observation], output_path: Path) -> None:

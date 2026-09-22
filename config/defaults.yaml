@@ -17,13 +17,19 @@ sources:
     agl_threshold_drop_m: -4.0
     agl_threshold_fix_m: 0.1
     max_height_m: 1000
+  generic_station:
+    tz_offset_hours: 8
+    station_prefix: STA
+    max_height_m: 1000
 
 quality_rules:
   windmaster:
-    preferred_heights_m: [113]
+    # All valid heights are passed to WindNinja; this legacy key is retained
+    # for compatibility and is intentionally empty.
+    preferred_heights_m: []
     max_time_offset_seconds: 120
   dat:
-    preferred_heights_m: [10]
+    preferred_heights_m: []
     max_time_offset_seconds: 120
 
 dem:
@@ -41,6 +47,13 @@ windninja:
   default_buffer_km: 10.0
   vegetation: trees
   num_threads: 4
+  diurnal_winds: false
+  non_neutral_stability: false
+  alpha_stability: null
+  input_wind_height_m: null
+  station_radius_of_influence_km: -1
+  output_buffer_clipping_pct: 0
+  turbulence_output: false
 
 output:
   default_output_dir_name: wind3d_output

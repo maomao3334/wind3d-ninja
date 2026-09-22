@@ -10,6 +10,7 @@ class ScanResult:
     dat: tuple[Path, ...]
     uav: tuple[Path, ...]
     dem: tuple[Path, ...]
+    generic_station: tuple[Path, ...] = ()
 
     def as_dict(self) -> dict[str, list[str]]:
         return {
@@ -17,6 +18,7 @@ class ScanResult:
             "dat": [str(path) for path in self.dat],
             "uav": [str(path) for path in self.uav],
             "dem": [str(path) for path in self.dem],
+            "generic_station": [str(path) for path in self.generic_station],
         }
 
 
@@ -29,7 +31,7 @@ class DataScanner:
     def scan(self) -> ScanResult:
         if not self.input_dir.is_dir():
             raise NotADirectoryError(self.input_dir)
-        found: dict[str, list[Path]] = {"windmaster": [], "dat": [], "uav": [], "dem": []}
+        found: dict[str, list[Path]] = {"windmaster": [], "dat": [], "uav": [], "dem": [], "generic_station": []}
         for path in sorted(self.input_dir.rglob("*")):
             if not path.is_file() or any(part.lower() in self._ignored_dirs for part in path.parts):
                 continue
@@ -40,6 +42,8 @@ class DataScanner:
                 found["dat"].append(path)
             elif suffix in {".xls", ".xlsx"}:
                 found["uav"].append(path)
+            elif suffix in {".csv", ".txt"}:
+                found["generic_station"].append(path)
             elif suffix in {".tif", ".tiff"}:
                 found["dem"].append(path)
         return ScanResult(**{key: tuple(value) for key, value in found.items()})

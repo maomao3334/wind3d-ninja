@@ -7,6 +7,7 @@ from pathlib import Path
 import netCDF4 as nc
 import numpy as np
 import rasterio
+import pytest
 from pyproj import CRS
 from rasterio.transform import from_origin
 
@@ -83,6 +84,37 @@ def create_inputs(root: Path) -> None:
         nodata=-9999.0,
     ) as dataset:
         dataset.write(np.full((40, 40), 100.0, dtype=np.float32), 1)
+
+
+def test_generic_station_csv_adapter(tmp_path: Path) -> None:
+    (tmp_path / "station.csv").write_text(
+        "Station,DateTime,Latitude,Longitude,Height_ft,WindSpeed_kmh,WindDirection\n"
+        "S1,2024-04-03 16:16:00,25.0255,102.3720,32.8084,36,180\n",
+        encoding="utf-8",
+    )
+    from wind3d_ninja.readers.generic_station import GenericStationReader
+
+    observations = GenericStationReader(
+        tmp_path / "station.csv", load_config().sources["generic_station"]
+    ).read()
+    assert len(observations) == 1
+    assert observations[0].height_m == pytest.approx(10.0, abs=1e-3)
+    assert observations[0].speed_ms == pytest.approx(10.0, abs=1e-3)
+    assert observations[0].time_utc.strftime("%H:%M") == "08:16"
+
+
+def test_auxiliary_csv_without_wind_columns_is_ignored(tmp_path: Path) -> None:
+    path = tmp_path / "windmaster_auxiliary.csv"
+    path.write_text(
+        "record,laser_status,signal\n1,ok,0.92\n",
+        encoding="utf-8",
+    )
+    from wind3d_ninja.readers.generic_station import GenericStationReader
+
+    observations = GenericStationReader(
+        path, load_config().sources["generic_station"]
+    ).read()
+    assert observations == []
 
 
 def test_pipeline_fixture(tmp_path: Path, capsys) -> None:

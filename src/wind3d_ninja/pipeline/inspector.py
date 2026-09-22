@@ -7,7 +7,7 @@ from ..config.models import AppConfig
 from ..discovery.scanner import DataScanner, ScanResult
 from ..observations.coordinator import complete_coordinates
 from ..observations.models import Observation
-from ..readers import DatReader, RawUavRecord, UavReader, WindMasterReader
+from ..readers import DatReader, GenericStationReader, RawUavRecord, UavReader, WindMasterReader
 from ..timeplan.axis import TimeAxis
 from ..utils.validation import observation_summary
 
@@ -17,6 +17,7 @@ class LoadedInputs:
     scan: ScanResult
     fixed_observations: tuple[Observation, ...]
     uav_inputs: tuple[tuple[UavReader, tuple[RawUavRecord, ...]], ...]
+    generic_observations: tuple[Observation, ...] = ()
 
 
 class InputInspector:
@@ -31,11 +32,16 @@ class InputInspector:
         for path in scan.dat:
             fixed.extend(DatReader(path, self.config.sources["dat"]).read())
         fixed = complete_coordinates(fixed) if fixed else []
+        generic: list[Observation] = []
+        generic_config = self.config.sources.get("generic_station", self.config.sources["dat"])
+        for path in scan.generic_station:
+            generic.extend(GenericStationReader(path, generic_config).read())
+        fixed.extend(complete_coordinates(generic) if generic else [])
         uav_inputs: list[tuple[UavReader, tuple[RawUavRecord, ...]]] = []
         for path in scan.uav:
             reader = UavReader(path, self.config.sources["uav"])
             uav_inputs.append((reader, tuple(reader.read_metadata())))
-        return LoadedInputs(scan, tuple(fixed), tuple(uav_inputs))
+        return LoadedInputs(scan, tuple(fixed), tuple(uav_inputs), tuple(generic))
 
     def inspect(self, input_dir: Path) -> dict[str, object]:
         loaded = self.load(input_dir)
@@ -49,6 +55,7 @@ class InputInspector:
             "input_dir": str(input_dir.resolve()),
             "files": loaded.scan.as_dict(),
             "fixed_observations": fixed_summary,
+            "generic_station_observations": observation_summary(loaded.generic_observations),
             "uav_metadata_count": len(raw_uav),
             "time_count": len(times),
             "time_start_utc": times[0] if times else None,

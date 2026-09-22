@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wind3d-ninja"
-version = "0.1.1"
+version = "1.0.0"
 description = "WindNinja-based multi-source wind-field downscaling CLI"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,7 +13,6 @@ license-files = ["LICENSE", "THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt"]
 authors = [{name = "wind3d-ninja contributors"}]
 dependencies = [
   "click>=8.1",
-  "elevation>=1.1",
   "netCDF4>=1.6",
   "numpy>=1.24",
   "openpyxl>=3.1",
@@ -29,6 +28,7 @@ test = ["build>=1.2", "pytest>=8.0"]
 
 [project.scripts]
 wind3d-ninja = "wind3d_ninja.cli.main:cli"
+wind3d-ninja-ui = "wind3d_ninja.ui.app:main"
 
 [project.urls]
 Homepage = "https://github.com/maomao3334/wind3d-ninja"
