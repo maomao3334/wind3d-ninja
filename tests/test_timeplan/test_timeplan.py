@@ -29,7 +29,7 @@ def test_time_axis_selection_and_filename() -> None:
     assert values[0].time_utc.second == 30
     selector = ObservationSelector({"windmaster": QualityRule((113,), 120)})
     selected = selector.select_for_time(times[0], values)
-    assert [item.height_m for item in selected] == [113]
+    assert [item.height_m for item in selected] == [113, 28]
     assert make_netcdf_filename(times[0], 200, 10) == "Wind3D_20240403T081600Z_200m_h010m.nc"
 
 

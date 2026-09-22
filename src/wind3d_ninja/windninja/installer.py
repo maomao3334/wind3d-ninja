@@ -6,6 +6,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
 import urllib.request
 import zipfile
@@ -52,6 +53,13 @@ def default_runtime_root() -> Path:
     configured = os.getenv("WINDNINJA_HOME")
     if configured:
         return Path(configured).expanduser()
+    # Installed distributions place UI/CLI in a subdirectory and WindNinja
+    # in the application root. Portable builds may place it beside the EXE.
+    executable_dir = Path(sys.executable).resolve().parent
+    for root in (executable_dir, executable_dir.parent):
+        bundled = root / "windninja"
+        if (bundled / "bin" / "WindNinja_cli.exe").is_file():
+            return bundled
     return Path.home() / ".wind3d-ninja" / "windninja" / WINDNINJA_VERSION
 
 
@@ -77,7 +85,7 @@ def _notify(callback: ProgressCallback | None, message: str) -> None:
 def _download_archive(destination: Path, progress: ProgressCallback | None = None) -> str:
     request = urllib.request.Request(
         WINDNINJA_DOWNLOAD_URL,
-        headers={"User-Agent": "wind3d-ninja/0.1.1"},
+        headers={"User-Agent": "wind3d-ninja/1.0.0"},
     )
     digest = hashlib.sha256()
     downloaded = 0

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -41,10 +42,18 @@ DEFAULTS: dict[str, Any] = {
             "agl_threshold_fix_m": 0.1,
             "max_height_m": 1000,
         },
+        "generic_station": {
+            "tz_offset_hours": 8,
+            "station_prefix": "STA",
+            "max_height_m": 1000,
+        },
     },
     "quality_rules": {
-        "windmaster": {"preferred_heights_m": [113], "max_time_offset_seconds": 120},
-        "dat": {"preferred_heights_m": [10], "max_time_offset_seconds": 120},
+        # All valid observation heights are passed to WindNinja.  The legacy
+        # preferred_heights_m key is retained for config compatibility but is
+        # intentionally empty and no longer filters input records.
+        "windmaster": {"preferred_heights_m": [], "max_time_offset_seconds": 120},
+        "dat": {"preferred_heights_m": [], "max_time_offset_seconds": 120},
     },
     "dem": {"cache_dir": "~/.wind3d-ninja/dem_cache", "source": "srtm"},
     "temperature": {
@@ -58,6 +67,13 @@ DEFAULTS: dict[str, Any] = {
         "default_buffer_km": 10.0,
         "vegetation": "trees",
         "num_threads": 4,
+        "diurnal_winds": False,
+        "non_neutral_stability": False,
+        "alpha_stability": None,
+        "input_wind_height_m": None,
+        "station_radius_of_influence_km": -1.0,
+        "output_buffer_clipping_pct": 0.0,
+        "turbulence_output": False,
     },
     "output": {
         "default_output_dir_name": "wind3d_output",
@@ -88,17 +104,31 @@ def _default_file() -> Path | None:
     configured = os.getenv("WIND3D_NINJA_DEFAULTS")
     if configured:
         return Path(configured).expanduser()
-    candidate = Path(__file__).resolve().parents[3] / "config" / "defaults.yaml"
-    return candidate if candidate.is_file() else None
+    candidates = [Path(__file__).resolve().parents[3] / "config" / "defaults.yaml"]
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.insert(0, Path(bundle_root) / "config" / "defaults.yaml")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _resolve_executable(value: str | Path, config_dir: Path) -> Path:
     env_value = os.getenv("WINDNINJA_BIN")
     env_home = os.getenv("WINDNINJA_HOME")
+    executable_dir = Path(sys.executable).resolve().parent
+    bundled_candidates = [
+        root / "windninja" / "bin" / "WindNinja_cli.exe"
+        for root in (executable_dir, executable_dir.parent)
+    ]
+    bundled = next((candidate for candidate in bundled_candidates if candidate.is_file()), None)
     if env_value:
         path = Path(env_value).expanduser()
     elif env_home:
         path = Path(env_home).expanduser() / "bin" / "WindNinja_cli.exe"
+    elif bundled is not None:
+        path = bundled
     else:
         path = Path(value).expanduser()
     if not path.is_absolute():

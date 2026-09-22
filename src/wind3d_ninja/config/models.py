@@ -42,6 +42,13 @@ class WindNinjaConfig:
     default_buffer_km: float = 10.0
     vegetation: str = "trees"
     num_threads: int = 4
+    diurnal_winds: bool = False
+    non_neutral_stability: bool = False
+    alpha_stability: float | None = None
+    input_wind_height_m: float | None = None
+    station_radius_of_influence_km: float = -1.0
+    output_buffer_clipping_pct: float = 0.0
+    turbulence_output: bool = False
 
 
 @dataclass(frozen=True)

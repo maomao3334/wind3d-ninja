@@ -26,7 +26,7 @@ wind3d-ninja --help
 `doctor --install` 会下载并校验固定的 WindNinja `3.12.2` Windows 运行时。默认安装到 `~/.wind3d-ninja/windninja/3.12.2/`。官方安装器需要管理员批准，Windows 弹出 UAC 对话框时点击“是”即可。若要放到其他磁盘，先在 Git Bash 中设置：
 
 ```bash
-export WINDNINJA_HOME="/g/tools/WindNinja-3.12.2"
+export WINDNINJA_HOME="/path/to/WindNinja-3.12.2"
 wind3d-ninja doctor --install
 ```
 

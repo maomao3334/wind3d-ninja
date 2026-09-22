@@ -13,6 +13,7 @@
 5. `--output` 可指定输出目录；不写时输出到输入目录下的 `wind3d_output`。
 6. 支持一个或多个分辨率，以及自动缓冲区或手动覆盖范围。
 7. NetCDF 只保存 `U_wind` 和 `V_wind`；KMZ 默认同时生成。
+8. 每个目标时刻会将时间窗口内所有来源、所有有效高度的站点数据输入 WindNinja，再分别计算用户指定的输出高度层；不会只挑选某一个“优选高度”。
 
 ## UAV 高度优化算法
 
@@ -69,7 +70,7 @@ wind3d-ninja doctor --install
 如果不想安装到用户主目录，可在 Git Bash 中先指定其他磁盘：
 
 ```bash
-export WINDNINJA_HOME="/g/tools/WindNinja-3.12.2"
+export WINDNINJA_HOME="/path/to/WindNinja-3.12.2"
 wind3d-ninja doctor --install
 ```
 
@@ -80,6 +81,20 @@ export WINDNINJA_BIN="/path/to/WindNinja_cli.exe"
 ```
 
 `wind3d-ninja doctor` 会检查最终解析到的可执行文件。源码维护在 [maomao3334/windninja](https://github.com/maomao3334/windninja) fork；自动安装使用 FireLab 官方预编译包，普通用户无需编译 C++。
+
+## Windows 最终安装包
+
+Windows 用户直接下载 GitHub Releases 中的 `Wind3D-Ninja-Setup-1.0.0-x64.exe`，双击安装即可。安装包已经包含 WindNinja 3.12.2、CLI、桌面 UI 和运行依赖，不需要另外安装 Python 或 WindNinja。
+
+安装完成后可以从开始菜单启动 UI。CLI 位于安装目录下的 `cli/wind3d-ninja.exe`；Git Bash 示例：
+
+```bash
+CLI="$HOME/AppData/Local/Programs/Wind3D-Ninja/cli/wind3d-ninja.exe"
+"$CLI" doctor
+"$CLI" run ./input_data --height 10 20 50 --resolution 100
+```
+
+安装器构建脚本不会保存任何访问令牌、用户名或本机绝对路径；如果从源码重建安装器，需要先设置 `WINDNINJA_SOURCE` 指向本地 WindNinja 3.12.2 目录。
 
 ## 四个命令
 
@@ -189,7 +204,7 @@ UAV 高度严格使用上面的 GPS、对地高度和 DEM 算法。
 
 ## 版本与许可证
 
-当前固定版本为 `v0.1.1`。本项目使用 MIT License；WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
+当前固定版本为 `v1.0.0`。Windows 最终交付安装器为 `Wind3D-Ninja-Setup-1.0.0-x64.exe`，已内置 WindNinja 3.12.2；本项目使用 MIT License，WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
 
 ## Legacy 10 m converter
 
@@ -201,3 +216,17 @@ py -3.11 windninja_10m_pipeline.py convert \
   --direction-asc ./windninja_work/terrain_180_5_200m_ang.asc \
   --output ./output/windninja_10m.nc
 ```
+# Desktop UI
+
+Install the optional Tk desktop interface from Git Bash:
+
+```bash
+py -3.11 -m pip install -e ".[ui]"
+wind3d-ninja-ui
+```
+
+The window provides input/output folder selection, WindNinja executable selection, multiple heights and resolutions, buffer, optional UTC+8 time range, manual bounds, KMZ toggle, and `doctor`/`inspect`/`plan`/`run` actions. Run output is streamed into the log panel while the computation runs in a background thread.
+
+The UI also allows an explicit DEM file. If it is left blank, the program first searches the input folder and downloads terrain data only when no suitable DEM is available. Advanced WindNinja controls expose vegetation (`trees`, `grass`, `brush`), diurnal winds, non-neutral stability, optional stability alpha, optional uniform input wind height, station radius of influence, output clipping, thread count, and turbulence output.
+
+Generic station files are also accepted: `.csv` and `.txt` files are automatically treated as station tables. The adapter recognizes common Chinese/English names for time, station, latitude, longitude, height, speed, direction, and temperature, supports long tables and multiple-height columns, and converts `km/h`, `mph`, `knots`, `cm`, and `ft` to the internal `m/s` and metre units. Use `inspect` first to review the detected station counts and time range before running.

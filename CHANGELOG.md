@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.0 - 2026-09-22
+
+- Added the Windows x64 installer with bundled WindNinja 3.12.2.
+- Added the Tk desktop UI and isolated CLI/UI runtimes.
+- Added reproducible full-install verification for `doctor`, `inspect`, `plan`, `run`, UI startup, and uninstall.
+- Fixed WindNinja 3.12.x configuration compatibility for the default point-initialization path.
+- Ignored auxiliary WindMaster CSV/TXT files that do not contain station observations.
+
 ## v0.1.1 - 2026-08-16
 
 - Fixed duplicate station files caused by the +/-120-second selection window; each WindNinja station now contributes only its nearest record for a target time.

@@ -38,17 +38,10 @@ class ObservationSelector:
             ]
             if not source_items:
                 continue
-            if rule and rule.preferred_heights_m:
-                preferred = [
-                    item
-                    for item in source_items
-                    if any(abs(item.height_m - height) < 0.01 for height in rule.preferred_heights_m)
-                ]
-                if preferred:
-                    source_items = preferred
             # WindNinja's Recent_Station_File_List requires one file per
-            # unique Station_Name.  A source may have several records inside
-            # the time window, so keep the nearest record for each station.
+            # unique Station_Name.  Keep every available observation height,
+            # but when a station has several records inside the time window,
+            # keep the nearest record for that station.
             nearest_by_station: dict[str, tuple[float, datetime, float, Observation]] = {}
             for item in source_items:
                 item_time = TimeAxis.to_utc(item.time_utc)

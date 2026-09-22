@@ -68,7 +68,7 @@ for target_time in automatic_time_axis:
 
 ## 观测时间选择窗口
 
-`ObservationSelector` 按数据源读取 `QualityRule.max_time_offset_seconds`。目标时刻会匹配该窗口内（含边界）的观测；当前默认 WindMaster 和 DAT 均为 ±120 秒。匹配后仍按 `preferred_heights_m` 执行高度优选，并且每个唯一站点只保留窗口内离目标时刻最近的一条记录，确保 WindNinja 的 `Recent_Station_File_List` 满足“一站点一文件”。
+`ObservationSelector` 按数据源读取 `QualityRule.max_time_offset_seconds`。目标时刻会匹配该窗口内（含边界）的观测；当前默认 WindMaster 和 DAT 均为 ±120 秒。窗口内各来源的所有有效高度都会保留，不再按 `preferred_heights_m` 过滤，这样低于 100 m 的湍流观测也能参与任意目标高度的降尺度。若同一站点在窗口内有多条记录，只保留离目标时刻最近的一条，确保 WindNinja 的 `Recent_Station_File_List` 满足“一站点一文件”。
 
 ## 覆盖范围
 

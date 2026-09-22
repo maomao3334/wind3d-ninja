@@ -27,6 +27,7 @@ class PipelinePlanner:
         buffer_km: float,
         manual_bounds: GeoBounds | None,
         time_range: tuple[datetime, datetime] | None = None,
+        dem_override: Path | None = None,
     ) -> dict[str, object]:
         loaded = InputInspector(self.config).load(input_dir)
         start_time, end_time = (
@@ -60,8 +61,11 @@ class PipelinePlanner:
         ]
         required_bounds = manual_bounds or bounds_from_points(points, buffer_km)
         self._progress(f"[wind3d] Planning: resolving DEM with buffer={buffer_km:g} km")
+        dem_candidates = list(loaded.scan.dem)
+        if dem_override is not None:
+            dem_candidates.insert(0, dem_override.expanduser().resolve())
         dem_path = DemManager(self.config.dem).get_dem(
-            loaded.scan.dem,
+            dem_candidates,
             located_records,
             buffer_km,
             manual_bounds,
