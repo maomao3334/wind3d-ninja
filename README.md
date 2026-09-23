@@ -84,7 +84,7 @@ export WINDNINJA_BIN="/path/to/WindNinja_cli.exe"
 
 ## Windows 最终安装包
 
-Windows 用户直接下载 GitHub Releases 中的 `Wind3D-Ninja-Setup-1.0.0-x64.exe`，双击安装即可。安装包已经包含 WindNinja 3.12.2、CLI、桌面 UI 和运行依赖，不需要另外安装 Python 或 WindNinja。
+Windows 用户直接下载 GitHub Releases 中的 `Wind3D-Ninja-Setup-1.0.1-x64.exe`，双击安装即可。安装包已经包含 WindNinja 3.12.2、CLI、桌面 UI 和运行依赖，不需要另外安装 Python 或 WindNinja。
 
 安装完成后可以从开始菜单启动 UI。CLI 位于安装目录下的 `cli/wind3d-ninja.exe`；Git Bash 示例：
 
@@ -204,7 +204,7 @@ UAV 高度严格使用上面的 GPS、对地高度和 DEM 算法。
 
 ## 版本与许可证
 
-当前固定版本为 `v1.0.0`。Windows 最终交付安装器为 `Wind3D-Ninja-Setup-1.0.0-x64.exe`，已内置 WindNinja 3.12.2；本项目使用 MIT License，WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
+当前固定版本为 `v1.0.1`。Windows 最终交付安装器为 `Wind3D-Ninja-Setup-1.0.1-x64.exe`，已内置 WindNinja 3.12.2；本项目使用 MIT License，WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
 
 ## Legacy 10 m converter
 
