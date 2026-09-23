@@ -6,6 +6,7 @@ import queue
 import threading
 import tkinter as tk
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Callable
@@ -33,6 +34,8 @@ class Wind3DApp(tk.Tk):
         self.worker: threading.Thread | None = None
         self.action_buttons: list[ttk.Button] = []
         self.last_output_dir: Path | None = None
+        self._time_options: list[str] = []
+        self._time_lookup: dict[str, str] = {}
         self._create_variables()
         self._build_ui()
         self.after(100, self._poll_events)
@@ -73,7 +76,14 @@ class Wind3DApp(tk.Tk):
         notebook.add(basic_tab, text="基本设置")
         notebook.add(advanced_tab, text="WindNinja 高级设置")
 
-        self._path_row(basic_tab, 0, "输入数据文件夹", self.input_dir, directory=True)
+        self._path_row(
+            basic_tab,
+            0,
+            "输入数据文件夹",
+            self.input_dir,
+            directory=True,
+            on_selected=self._queue_time_refresh,
+        )
         self._path_row(basic_tab, 1, "输出文件夹（可选）", self.output_dir, directory=True)
         self._path_row(
             basic_tab,
@@ -92,14 +102,19 @@ class Wind3DApp(tk.Tk):
         self._entry_row(basic_tab, 4, "输出高度（米，空格分隔）", self.heights)
         self._entry_row(basic_tab, 5, "分辨率（米，空格分隔）", self.resolutions)
         self._entry_row(basic_tab, 6, "区域外扩 Buffer（公里）", self.buffer_km)
-        self._entry_row(basic_tab, 7, "开始时间（UTC+8，可选）", self.start_time)
-        self._entry_row(basic_tab, 8, "结束时间（UTC+8，可选）", self.end_time)
-        self._entry_row(basic_tab, 9, "区域范围（可选）", self.bounds)
+        self._time_row(basic_tab, 7, "开始时间（从已有观测选择，UTC+8）", self.start_time)
+        self._time_row(basic_tab, 8, "结束时间（从已有观测选择，UTC+8）", self.end_time)
+        ttk.Button(
+            basic_tab,
+            text="刷新可用时间",
+            command=self._queue_time_refresh,
+        ).grid(row=9, column=2, sticky=tk.W, padx=(8, 0), pady=5)
+        self._entry_row(basic_tab, 10, "区域范围（可选）", self.bounds)
         ttk.Label(basic_tab, text="格式：min_lat max_lat min_lon max_lon").grid(
-            row=10, column=1, sticky=tk.W, pady=(0, 6)
+            row=11, column=1, sticky=tk.W, pady=(0, 6)
         )
         ttk.Checkbutton(basic_tab, text="生成 KMZ", variable=self.generate_kmz).grid(
-            row=11, column=1, sticky=tk.W, pady=4
+            row=12, column=1, sticky=tk.W, pady=4
         )
         basic_tab.columnconfigure(1, weight=1)
 
@@ -152,6 +167,20 @@ class Wind3DApp(tk.Tk):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky=tk.W, padx=(0, 10), pady=5)
         ttk.Entry(parent, textvariable=variable).grid(row=row, column=1, sticky=tk.EW, pady=5)
 
+    def _time_row(self, parent: ttk.Frame, row: int, label: str, variable: tk.StringVar) -> None:
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky=tk.W, padx=(0, 10), pady=5)
+        combo = ttk.Combobox(
+            parent,
+            textvariable=variable,
+            values=self._time_options,
+            state="readonly",
+        )
+        combo.grid(row=row, column=1, sticky=tk.EW, pady=5)
+        if variable is self.start_time:
+            self._start_combo = combo
+        else:
+            self._end_combo = combo
+
     def _path_row(
         self,
         parent: ttk.Frame,
@@ -161,6 +190,7 @@ class Wind3DApp(tk.Tk):
         *,
         directory: bool = False,
         filetypes: list[tuple[str, str]] | None = None,
+        on_selected: Callable[[], None] | None = None,
     ) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky=tk.W, padx=(0, 10), pady=5)
         frame = ttk.Frame(parent)
@@ -177,6 +207,8 @@ class Wind3DApp(tk.Tk):
             )
             if selected:
                 variable.set(selected)
+                if on_selected is not None:
+                    on_selected()
 
         ttk.Button(frame, text="浏览…", command=browse).pack(side=tk.LEFT, padx=(6, 0))
 
@@ -193,9 +225,11 @@ class Wind3DApp(tk.Tk):
             raise ValueError("输出高度必须是正整数")
         if not resolutions or any(value <= 0 for value in resolutions):
             raise ValueError("分辨率必须是正整数")
-        start, end = self.start_time.get().strip(), self.end_time.get().strip()
+        start_display, end_display = self.start_time.get().strip(), self.end_time.get().strip()
+        start = self._time_lookup.get(start_display, start_display)
+        end = self._time_lookup.get(end_display, end_display)
         if bool(start) != bool(end):
-            raise ValueError("开始时间和结束时间必须同时填写")
+            raise ValueError("开始时间和结束时间必须同时选择")
         time_range = parse_time_range_utc((start, end), 8) if start else None
         bounds = (
             parse_bounds(self.bounds.get().replace(",", " ").split())
@@ -214,6 +248,59 @@ class Wind3DApp(tk.Tk):
             bounds,
             dem,
         )
+
+    @staticmethod
+    def _display_time(value: datetime) -> tuple[str, str]:
+        utc_value = value.astimezone(timezone.utc).replace(second=0, microsecond=0)
+        local_value = utc_value.astimezone(timezone(timedelta(hours=8)))
+        return (
+            local_value.strftime("%Y-%m-%d %H:%M"),
+            utc_value.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+
+    def _queue_time_refresh(self) -> None:
+        input_text = self.input_dir.get().strip()
+        input_path = Path(input_text)
+        if not input_text or not input_path.is_dir():
+            self._set_time_options([])
+            return
+        if self.worker is not None and self.worker.is_alive():
+            return
+        self.status.set("正在读取观测时间…")
+
+        def load_times() -> list[tuple[str, str]]:
+            loaded = InputInspector(self.base_config).load(input_path)
+            raw_uav = [record for _, records in loaded.uav_inputs for record in records]
+            values = [item.time_utc for item in loaded.fixed_observations]
+            values.extend(record.time_utc for record in raw_uav)
+            values.extend(item.time_utc for item in loaded.generic_observations)
+            return sorted({self._display_time(value) for value in values})
+
+        def execute() -> None:
+            try:
+                self.events.put(("times", load_times()))
+            except Exception as error:
+                self.events.put(("time_error", f"读取观测时间失败：{type(error).__name__}: {error}"))
+            finally:
+                self.events.put(("time_finished", None))
+
+        self.worker = threading.Thread(target=execute, daemon=True)
+        self.worker.start()
+
+    def _set_time_options(self, values: list[tuple[str, str]]) -> None:
+        self._time_options = [display for display, _ in values]
+        self._time_lookup = dict(values)
+        for combo in (
+            getattr(self, "_start_combo", None),
+            getattr(self, "_end_combo", None),
+        ):
+            if combo is not None:
+                combo.configure(values=self._time_options)
+        if self.start_time.get() not in self._time_options:
+            self.start_time.set("")
+        if self.end_time.get() not in self._time_options:
+            self.end_time.set("")
+        self.status.set(f"已加载 {len(self._time_options)} 个观测时刻")
 
     def _runtime_config(self):
         config = load_config()
@@ -269,6 +356,11 @@ class Wind3DApp(tk.Tk):
                 elif kind == "error":
                     self._append_log(f"错误：{value}")
                     messagebox.showerror("运行失败", str(value))
+                elif kind == "times":
+                    self._set_time_options(value)  # type: ignore[arg-type]
+                elif kind == "time_error":
+                    self._append_log(str(value))
+                    messagebox.showerror("时间读取失败", str(value))
                 elif kind == "finished":
                     self.progress.stop()
                     self.status.set("就绪")

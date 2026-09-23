@@ -225,7 +225,7 @@ py -3.11 -m pip install -e ".[ui]"
 wind3d-ninja-ui
 ```
 
-The window provides input/output folder selection, WindNinja executable selection, multiple heights and resolutions, buffer, optional UTC+8 time range, manual bounds, KMZ toggle, and `doctor`/`inspect`/`plan`/`run` actions. Run output is streamed into the log panel while the computation runs in a background thread.
+The window provides input/output folder selection, WindNinja executable selection, multiple heights and resolutions, buffer, manual bounds, KMZ toggle, and `doctor`/`inspect`/`plan`/`run` actions. After selecting an input folder, click `刷新可用时间`; the start/end time boxes are populated from timestamps actually found in the observations and are selected from dropdowns instead of typed manually. Run output is streamed into the log panel while the computation runs in a background thread.
 
 The UI also allows an explicit DEM file. If it is left blank, the program first searches the input folder and downloads terrain data only when no suitable DEM is available. Advanced WindNinja controls expose vegetation (`trees`, `grass`, `brush`), diurnal winds, non-neutral stability, optional stability alpha, optional uniform input wind height, station radius of influence, output clipping, thread count, and turbulence output.
 
