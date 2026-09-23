@@ -84,7 +84,7 @@ export WINDNINJA_BIN="/path/to/WindNinja_cli.exe"
 
 ## Windows 最终安装包
 
-Windows 用户直接下载 GitHub Releases 中的 `Wind3D-Ninja-Setup-1.0.0-x64.exe`，双击安装即可。安装包已经包含 WindNinja 3.12.2、CLI、桌面 UI 和运行依赖，不需要另外安装 Python 或 WindNinja。
+Windows 用户直接下载 GitHub Releases 中的 `Wind3D-Ninja-Setup-1.0.1-x64.exe`，双击安装即可。安装包已经包含 WindNinja 3.12.2、CLI、桌面 UI 和运行依赖，不需要另外安装 Python 或 WindNinja。
 
 安装完成后可以从开始菜单启动 UI。CLI 位于安装目录下的 `cli/wind3d-ninja.exe`；Git Bash 示例：
 
@@ -204,7 +204,7 @@ UAV 高度严格使用上面的 GPS、对地高度和 DEM 算法。
 
 ## 版本与许可证
 
-当前固定版本为 `v1.0.0`。Windows 最终交付安装器为 `Wind3D-Ninja-Setup-1.0.0-x64.exe`，已内置 WindNinja 3.12.2；本项目使用 MIT License，WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
+当前固定版本为 `v1.0.1`。Windows 最终交付安装器为 `Wind3D-Ninja-Setup-1.0.1-x64.exe`，已内置 WindNinja 3.12.2；本项目使用 MIT License，WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
 
 ## Legacy 10 m converter
 
@@ -225,7 +225,7 @@ py -3.11 -m pip install -e ".[ui]"
 wind3d-ninja-ui
 ```
 
-The window provides input/output folder selection, WindNinja executable selection, multiple heights and resolutions, buffer, optional UTC+8 time range, manual bounds, KMZ toggle, and `doctor`/`inspect`/`plan`/`run` actions. Run output is streamed into the log panel while the computation runs in a background thread.
+The window provides input/output folder selection, WindNinja executable selection, multiple heights and resolutions, buffer, manual bounds, KMZ toggle, and `doctor`/`inspect`/`plan`/`run` actions. After selecting an input folder, click `刷新可用时间`; the start/end time boxes are populated from timestamps actually found in the observations and are selected from dropdowns instead of typed manually. Run output is streamed into the log panel while the computation runs in a background thread.
 
 The UI also allows an explicit DEM file. If it is left blank, the program first searches the input folder and downloads terrain data only when no suitable DEM is available. Advanced WindNinja controls expose vegetation (`trees`, `grass`, `brush`), diurnal winds, non-neutral stability, optional stability alpha, optional uniform input wind height, station radius of influence, output clipping, thread count, and turbulence output.
 

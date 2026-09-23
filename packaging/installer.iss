@@ -1,5 +1,5 @@
 #define MyAppName "Wind3D Ninja"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "wind3d-ninja contributors"
 #define MyAppExeName "Wind3D-Ninja.exe"
 
@@ -15,7 +15,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=..\installer_output
-OutputBaseFilename=Wind3D-Ninja-Setup-1.0.0-x64
+OutputBaseFilename=Wind3D-Ninja-Setup-1.0.1-x64
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -23,7 +23,7 @@ UninstallDisplayIcon={app}\ui\{#MyAppExeName}
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=1.0.1.0
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.1 - 2026-09-23
+
+- Desktop UI time ranges now use dropdowns populated from timestamps found in the selected input data.
+- Added a refresh action for available observation times and documented the new workflow.
+- Published the Windows installer as `Wind3D-Ninja-Setup-1.0.1-x64.exe`.
+
 ## v1.0.0 - 2026-09-22
 
 - Added the Windows x64 installer with bundled WindNinja 3.12.2.

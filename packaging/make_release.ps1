@@ -14,7 +14,7 @@ $WindNinjaSource = (Resolve-Path -LiteralPath $WindNinjaSource).Path
 
 $root = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $root "release\wind3d-ninja-ui-portable"
-$package = Join-Path $root "release\Wind3D-Ninja-1.0.0-Windows-x64"
+$package = Join-Path $root "release\Wind3D-Ninja-1.0.1-Windows-x64"
 
 if (Test-Path $package) { Remove-Item -LiteralPath $package -Recurse -Force }
 Copy-Item -LiteralPath $source -Destination $package -Recurse
@@ -22,7 +22,7 @@ Copy-Item -LiteralPath $WindNinjaSource -Destination (Join-Path $package "windni
 Copy-Item -LiteralPath (Join-Path $root "release\wind3d-ninja.exe") -Destination $package
 
 $readme = @"
-Wind3D Ninja 1.0.0
+Wind3D Ninja 1.0.1
 
 1. Double-click wind3d-ninja-ui.exe to start.
 2. WindNinja 3.12.2 is already included in the windninja folder.

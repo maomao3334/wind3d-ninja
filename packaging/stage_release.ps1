@@ -38,7 +38,7 @@ Copy-Item -LiteralPath $CliSource -Destination (Join-Path $Stage "cli") -Recurse
 Copy-Item -LiteralPath $WindNinjaSource -Destination (Join-Path $Stage "windninja") -Recurse
 
 $Readme = @(
-    "Wind3D Ninja 1.0.0"
+    "Wind3D Ninja 1.0.1"
     "===================="
     ""
     "Included:"

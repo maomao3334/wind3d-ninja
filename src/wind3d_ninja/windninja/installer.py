@@ -85,7 +85,7 @@ def _notify(callback: ProgressCallback | None, message: str) -> None:
 def _download_archive(destination: Path, progress: ProgressCallback | None = None) -> str:
     request = urllib.request.Request(
         WINDNINJA_DOWNLOAD_URL,
-        headers={"User-Agent": "wind3d-ninja/1.0.0"},
+        headers={"User-Agent": "wind3d-ninja/1.0.1"},
     )
     digest = hashlib.sha256()
     downloaded = 0

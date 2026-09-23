@@ -34,7 +34,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "ISCC failed with exit code $LASTEXITCODE."
 }
 
-$Artifact = Join-Path $OutputDir "Wind3D-Ninja-Setup-1.0.0-x64.exe"
+$Artifact = Join-Path $OutputDir "Wind3D-Ninja-Setup-1.0.1-x64.exe"
 if (-not (Test-Path -LiteralPath $Artifact -PathType Leaf)) {
     throw "Installer artifact was not created: $Artifact"
 }
