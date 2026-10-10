@@ -25,6 +25,19 @@ class WindNinjaConfigWriter:
         output_buffer_clipping_pct: float = 0.0,
         turbulence_output: bool = False,
     ) -> Path:
+        if turbulence_output or non_neutral_stability:
+            requested_options = []
+            if non_neutral_stability:
+                requested_options.append("non-neutral stability")
+            if turbulence_output:
+                requested_options.append("turbulence output")
+            options = ", ".join(requested_options)
+            raise ValueError(
+                f"WindNinja 3.12.2 cannot combine {options} with pointInitialization. "
+                "This workflow uses pointInitialization to assimilate the input station observations; "
+                "disable these momentum-solver options and run again."
+            )
+
         value = target_time.astimezone(timezone.utc)
         settings = {
             "num_threads": num_threads,
@@ -61,16 +74,6 @@ class WindNinjaConfigWriter:
             "stop_minute": value.minute,
             "number_time_steps": 1,
         }
-        # WindNinja 3.12.x treats turbulence_output_flag as a momentum-solver
-        # option and rejects the key unless momentum_flag is also enabled.
-        # Omit the option entirely for the normal point-initialization path;
-        # when turbulence output is explicitly requested, opt into the solver
-        # pair together so the generated configuration is internally valid.
-        if turbulence_output:
-            settings["momentum_flag"] = "true"
-            settings["turbulence_output_flag"] = "true"
-        elif non_neutral_stability:
-            settings["momentum_flag"] = "true"
         if alpha_stability is not None:
             settings["alpha_stability"] = alpha_stability
         if input_wind_height_m is not None:

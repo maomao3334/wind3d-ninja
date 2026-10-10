@@ -12,7 +12,12 @@ a = Analysis(
     datas=[(str(project / "config"), "config")] + rasterio_data + pyproj_data,
     hiddenimports=["netCDF4", "openpyxl", "xlrd"] + rasterio_hidden + pyproj_hidden,
     hookspath=[], hooksconfig={}, runtime_hooks=[],
-    excludes=["PySide6", "PyQt5", "PyQt6", "torch", "matplotlib", "pytest", "scipy", "boto3", "botocore", "numba", "llvmlite"],
+    excludes=[
+        "PySide6", "PyQt5", "PyQt6", "torch", "matplotlib", "pytest", "scipy",
+        "boto3", "botocore", "numba", "llvmlite", "IPython", "jedi", "parso",
+        "prompt_toolkit", "jupyter", "notebook", "nbformat", "nbconvert", "debugpy",
+        "pydantic", "paramiko", "scrapling", "playwright", "selenium", "PIL",
+    ],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

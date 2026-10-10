@@ -30,6 +30,8 @@ export WINDNINJA_HOME="/path/to/WindNinja-3.12.2"
 wind3d-ninja doctor --install
 ```
 
+安装包本身不依赖开发机绝对路径。UI/CLI 会从当前程序目录的上一级查找 `windninja/bin/WindNinja_cli.exe`，所以必须把 `ui`、`cli` 和 `windninja` 三个目录作为一个整体移动；若旧的 `WINDNINJA_BIN` 或 `WINDNINJA_HOME` 已失效，会自动回退到当前安装包内置运行时。运行时配置文件中出现的绝对路径只是按本机输入/输出目录临时生成，不会写死在源码或安装包中。
+
 ## 检查输入
 
 ```bash

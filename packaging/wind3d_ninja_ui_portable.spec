@@ -14,7 +14,12 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[str(project / "packaging" / "ui_runtime_hook.py")],
-    excludes=["torch", "matplotlib", "pytest", "scipy", "boto3", "botocore"],
+    excludes=[
+        "torch", "matplotlib", "pytest", "scipy", "boto3", "botocore",
+        "numba", "llvmlite", "IPython", "jedi", "parso", "prompt_toolkit",
+        "jupyter", "notebook", "nbformat", "nbconvert", "debugpy", "pydantic",
+        "paramiko", "scrapling", "playwright", "selenium", "PIL",
+    ],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

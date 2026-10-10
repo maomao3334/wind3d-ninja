@@ -59,7 +59,9 @@ class WindNinjaRunner:
                 process.kill()
             raise
         if returncode != 0:
-            raise RuntimeError(f"WindNinja exited with {returncode}; see {log_file}")
+            raise RuntimeError(
+                f"WindNinja exited with {returncode}; see {_display_log_path(log_file)}"
+            )
         vel_candidates = sorted(work_dir.rglob("*_vel.asc"), key=lambda path: path.stat().st_mtime)
         for vel_asc in reversed(vel_candidates):
             ang_asc = vel_asc.with_name(vel_asc.name.replace("_vel.asc", "_ang.asc"))
@@ -81,3 +83,18 @@ class WindNinjaRunner:
                 command=command,
             )
         raise FileNotFoundError(f"WindNinja produced no matching ASCII wind grids in {work_dir}")
+
+
+def _display_log_path(log_file: Path) -> str:
+    """Return a relocatable log reference for user-facing errors.
+
+    The result object still retains the absolute ``Path`` for programmatic
+    access and manifests.  Error dialogs use the stable path below the output
+    folder so they do not expose a developer-machine drive.
+    """
+
+    parts = log_file.parts
+    for index in range(len(parts) - 1, -1, -1):
+        if parts[index].casefold() == "windninja":
+            return str(Path(*parts[index:]))
+    return log_file.name

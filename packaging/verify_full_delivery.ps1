@@ -16,6 +16,8 @@ $InputDir = (Resolve-Path -LiteralPath $InputDir).Path
 $Root = Join-Path $env:TEMP "wind3d-ninja-full-delivery-test"
 $InstallDir = Join-Path $Root "installed"
 $OutputDir = Join-Path $Root "pipeline-output"
+$MigratedRoot = Join-Path $Root "migrated"
+$MigratedOutputDir = Join-Path $Root "migrated-pipeline-output"
 $LogDir = Join-Path $Root "logs"
 
 if (Test-Path -LiteralPath $Root) {
@@ -42,7 +44,7 @@ function Invoke-Cli {
             $value
         }
     }) -join ' '
-    $process = Start-Process -FilePath $Cli -ArgumentList $argumentString `
+    $process = Start-Process -FilePath $Cli -ArgumentList $argumentString -WindowStyle Hidden `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr `
         -Wait -PassThru
     $out = Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue
@@ -57,6 +59,37 @@ function Invoke-Cli {
     }
 }
 
+function Invoke-CliAt {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Executable,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments,
+        [Parameter(Mandatory = $true)]
+        [string]$LogName
+    )
+    $stdout = Join-Path $LogDir "$LogName.stdout.txt"
+    $stderr = Join-Path $LogDir "$LogName.stderr.txt"
+    $argumentString = ($Arguments | ForEach-Object {
+        $value = [string]$_
+        if ($value -match '[\s\"]') {
+            '"' + ($value -replace '"', '\\"') + '"'
+        }
+        else {
+            $value
+        }
+    }) -join ' '
+    $process = Start-Process -FilePath $Executable -ArgumentList $argumentString -WindowStyle Hidden `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr `
+        -Wait -PassThru
+    $out = Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue
+    $err = Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue
+    if ($process.ExitCode -ne 0) {
+        throw "CLI command '$LogName' failed with exit code $($process.ExitCode).`n$out`n$err"
+    }
+    return [pscustomobject]@{ ExitCode = $process.ExitCode; Stdout = $out; Stderr = $err }
+}
+
 $installArgs = @(
     "/VERYSILENT"
     "/SUPPRESSMSGBOXES"
@@ -65,7 +98,7 @@ $installArgs = @(
     "/DIR=$InstallDir"
     "/LOG=$(Join-Path $Root 'install.log')"
 )
-$installerProcess = Start-Process -FilePath $InstallerPath -ArgumentList $installArgs -Wait -PassThru
+$installerProcess = Start-Process -FilePath $InstallerPath -ArgumentList $installArgs -WindowStyle Hidden -Wait -PassThru
 if ($installerProcess.ExitCode -ne 0) {
     throw "Wind3D Ninja installer failed with exit code $($installerProcess.ExitCode)."
 }
@@ -79,10 +112,26 @@ foreach ($required in @($Ui, $Cli, $WindNinja)) {
     }
 }
 
+Copy-Item -LiteralPath $InstallDir -Destination $MigratedRoot -Recurse -Force
+$MigratedCli = Join-Path $MigratedRoot "cli\wind3d-ninja.exe"
+$MigratedUi = Join-Path $MigratedRoot "ui\Wind3D-Ninja.exe"
+$MigratedWindNinja = Join-Path $MigratedRoot "windninja\bin\WindNinja_cli.exe"
+foreach ($required in @($MigratedCli, $MigratedUi, $MigratedWindNinja)) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+        throw "Migrated installation file is missing: $required"
+    }
+}
+
 $help = Invoke-Cli -Arguments @("--help") -LogName "cli-help"
 $doctor = Invoke-Cli -Arguments @("doctor") -LogName "doctor"
 if ($doctor.Stdout -notmatch "healthy: True") {
     throw "Installed CLI doctor did not report healthy: True.`n$($doctor.Stdout)"
+}
+
+$migratedDoctor = Invoke-CliAt -Executable $MigratedCli -Arguments @("doctor") -LogName "migrated-doctor"
+if ($migratedDoctor.Stdout -notmatch "healthy: True") {
+    $migratedDoctorText = $migratedDoctor.Stdout + $migratedDoctor.Stderr
+    throw "Migrated CLI doctor failed:`n$migratedDoctorText"
 }
 $inspect = Invoke-Cli -Arguments @("inspect", $InputDir) -LogName "inspect"
 $plan = Invoke-Cli -Arguments @(
@@ -100,6 +149,19 @@ $run = Invoke-Cli -Arguments @(
     "--output", $OutputDir
 ) -LogName "run"
 
+$migratedRun = Invoke-CliAt -Executable $MigratedCli -Arguments @(
+    "run", $InputDir,
+    "--height", $Height,
+    "--resolution", $Resolution,
+    "--time-range", $TimeStart, $TimeEnd,
+    "--output", $MigratedOutputDir
+) -LogName "migrated-run"
+$migratedNcFiles = @(Get-ChildItem -LiteralPath (Join-Path $MigratedOutputDir "nc") -Filter "*.nc" -File -ErrorAction SilentlyContinue)
+$migratedKmzFiles = @(Get-ChildItem -LiteralPath (Join-Path $MigratedOutputDir "kmz") -Filter "*.kmz" -File -ErrorAction SilentlyContinue)
+if ($migratedNcFiles.Count -lt 1 -or $migratedKmzFiles.Count -lt 1) {
+    throw "Migrated CLI run did not produce both NetCDF and KMZ output."
+}
+
 $ncFiles = @(Get-ChildItem -LiteralPath (Join-Path $OutputDir "nc") -Filter "*.nc" -File -ErrorAction SilentlyContinue)
 $kmzFiles = @(Get-ChildItem -LiteralPath (Join-Path $OutputDir "kmz") -Filter "*.kmz" -File -ErrorAction SilentlyContinue)
 if ($ncFiles.Count -lt 1) {
@@ -114,7 +176,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $OutputDir "manifest.json") -PathTyp
 
 $versionStdout = Join-Path $LogDir "windninja-version.stdout.txt"
 $versionStderr = Join-Path $LogDir "windninja-version.stderr.txt"
-$versionProcess = Start-Process -FilePath $WindNinja -ArgumentList "--version" `
+$versionProcess = Start-Process -FilePath $WindNinja -ArgumentList "--version" -WindowStyle Hidden `
     -RedirectStandardOutput $versionStdout -RedirectStandardError $versionStderr `
     -Wait -PassThru
 $version = ((Get-Content -LiteralPath $versionStdout -Raw -ErrorAction SilentlyContinue) +
@@ -123,11 +185,21 @@ if ($version -notmatch "WindNinja version: 3\.12\.2") {
     throw "Bundled WindNinja version check failed:`n$version"
 }
 
-$uiProcess = Start-Process -FilePath $Ui -PassThru
+$uiProcess = Start-Process -FilePath $Ui -WindowStyle Hidden -PassThru
 Start-Sleep -Seconds 8
 $uiAlive = -not $uiProcess.HasExited
 if ($uiAlive) {
     Stop-Process -Id $uiProcess.Id -Force
+}
+
+$migratedUiProcess = Start-Process -FilePath $MigratedUi -WindowStyle Hidden -PassThru
+Start-Sleep -Seconds 8
+$migratedUiAlive = -not $migratedUiProcess.HasExited
+if ($migratedUiAlive) {
+    Stop-Process -Id $migratedUiProcess.Id -Force
+}
+if (-not $migratedUiAlive) {
+    throw "Migrated UI exited before the startup check completed."
 }
 if (-not $uiAlive) {
     throw "Installed UI exited before the startup check completed."
@@ -137,7 +209,7 @@ $uninstaller = Join-Path $InstallDir "unins000.exe"
 if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
     throw "Uninstaller is missing: $uninstaller"
 }
-$uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+$uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -WindowStyle Hidden -Wait -PassThru
 if ($uninstallProcess.ExitCode -ne 0) {
     throw "Uninstaller failed with exit code $($uninstallProcess.ExitCode)."
 }
@@ -152,6 +224,11 @@ if (Test-Path -LiteralPath $InstallDir) {
     InspectPassed = $true
     PlanPassed = $true
     RunPassed = $true
+    MigratedDoctorHealthy = $true
+    MigratedRunPassed = $true
+    MigratedUiStarted = $true
+    MigratedNetCdfFiles = $migratedNcFiles.Count
+    MigratedKmzFiles = $migratedKmzFiles.Count
     NetCdfFiles = $ncFiles.Count
     KmzFiles = $kmzFiles.Count
     WindNinjaVersion = "3.12.2"

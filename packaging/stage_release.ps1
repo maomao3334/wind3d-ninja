@@ -5,8 +5,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$UiSource = Join-Path $ProjectRoot "installer_dist\Wind3D-Ninja"
-$CliSource = Join-Path $ProjectRoot "installer_dist\wind3d-ninja-cli"
+$UiSource = Join-Path $ProjectRoot "release\wind3d-ninja-ui-portable"
+$CliSource = Join-Path $ProjectRoot "release\wind3d-ninja-cli"
 $Stage = Join-Path $ProjectRoot "installer_stage"
 
 if ([string]::IsNullOrWhiteSpace($WindNinjaSource)) {
@@ -18,7 +18,7 @@ if (-not (Test-Path -LiteralPath $WindNinjaSource -PathType Container)) {
 $WindNinjaSource = (Resolve-Path -LiteralPath $WindNinjaSource).Path
 
 $RequiredFiles = @(
-    (Join-Path $UiSource "Wind3D-Ninja.exe"),
+    (Join-Path $UiSource "wind3d-ninja-ui.exe"),
     (Join-Path $CliSource "wind3d-ninja.exe"),
     (Join-Path $WindNinjaSource "bin\WindNinja_cli.exe")
 )
@@ -37,8 +37,16 @@ Copy-Item -LiteralPath $UiSource -Destination (Join-Path $Stage "ui") -Recurse
 Copy-Item -LiteralPath $CliSource -Destination (Join-Path $Stage "cli") -Recurse
 Copy-Item -LiteralPath $WindNinjaSource -Destination (Join-Path $Stage "windninja") -Recurse
 
+# Keep the installer-facing UI name stable even though PyInstaller's portable
+# spec uses a lowercase executable name.
+$stagedUi = Join-Path $Stage "ui\wind3d-ninja-ui.exe"
+$installerUi = Join-Path $Stage "ui\Wind3D-Ninja.exe"
+if (Test-Path -LiteralPath $stagedUi -PathType Leaf) {
+    Move-Item -LiteralPath $stagedUi -Destination $installerUi -Force
+}
+
 $Readme = @(
-    "Wind3D Ninja 1.0.1"
+    "Wind3D Ninja 1.0.3"
     "===================="
     ""
     "Included:"

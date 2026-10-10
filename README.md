@@ -82,9 +82,15 @@ export WINDNINJA_BIN="/path/to/WindNinja_cli.exe"
 
 `wind3d-ninja doctor` 会检查最终解析到的可执行文件。源码维护在 [maomao3334/windninja](https://github.com/maomao3334/windninja) fork；自动安装使用 FireLab 官方预编译包，普通用户无需编译 C++。
 
+### 路径可迁移性
+
+安装包不会把开发机的绝对路径写入程序。UI 和 CLI 每次启动都会根据当前可执行文件的位置查找同级的 `windninja/bin/WindNinja_cli.exe`；因此把整个安装目录复制到另一台电脑后仍可运行。只有在 UI 中主动选择自定义 WindNinja，或设置 `WINDNINJA_BIN`/`WINDNINJA_HOME` 时，才会使用外部路径；如果这些变量指向已经不存在的旧电脑路径，程序会自动回退到安装包内置版本。
+
+运行时生成的 `windninja.cfg` 为了让 Windows 版 WindNinja 稳定读取输入文件，可能包含当前电脑上的绝对临时路径。这些路径不是源码硬编码，每次运行都会按当前输入/输出目录重新生成；迁移时请移动整个安装目录，重新选择数据目录后再次运行。
+
 ## Windows 最终安装包
 
-Windows 用户直接下载 GitHub Releases 中的 `Wind3D-Ninja-Setup-1.0.1-x64.exe`，双击安装即可。安装包已经包含 WindNinja 3.12.2、CLI、桌面 UI 和运行依赖，不需要另外安装 Python 或 WindNinja。
+Windows 用户直接下载 GitHub Releases 中的 `Wind3D-Ninja-Setup-1.0.3-x64.exe`，双击安装即可。安装包已经包含 WindNinja 3.12.2、CLI、桌面 UI 和运行依赖，不需要另外安装 Python 或 WindNinja。
 
 安装完成后可以从开始菜单启动 UI。CLI 位于安装目录下的 `cli/wind3d-ninja.exe`；Git Bash 示例：
 
@@ -199,12 +205,13 @@ UAV 高度严格使用上面的 GPS、对地高度和 DEM 算法。
 详细说明：
 
 - [使用指南](docs/usage.md)
+- [中文完整使用指南](docs/user_guide_zh.md)
 - [架构说明](docs/architecture.md)
 - [数据格式](docs/data_formats.md)
 
 ## 版本与许可证
 
-当前固定版本为 `v1.0.1`。Windows 最终交付安装器为 `Wind3D-Ninja-Setup-1.0.1-x64.exe`，已内置 WindNinja 3.12.2；本项目使用 MIT License，WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
+当前固定版本为 `v1.0.3`。Windows 最终交付安装器为 `Wind3D-Ninja-Setup-1.0.3-x64.exe`，已内置 WindNinja 3.12.2；本项目使用 MIT License，WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
 
 ## Legacy 10 m converter
 
@@ -221,12 +228,12 @@ py -3.11 windninja_10m_pipeline.py convert \
 Install the optional Tk desktop interface from Git Bash:
 
 ```bash
-py -3.11 -m pip install -e ".[ui]"
+py -3.11 -m pip install -e .
 wind3d-ninja-ui
 ```
 
 The window provides input/output folder selection, WindNinja executable selection, multiple heights and resolutions, buffer, manual bounds, KMZ toggle, and `doctor`/`inspect`/`plan`/`run` actions. After selecting an input folder, click `刷新可用时间`; the start/end time boxes are populated from timestamps actually found in the observations and are selected from dropdowns instead of typed manually. Run output is streamed into the log panel while the computation runs in a background thread.
 
-The UI also allows an explicit DEM file. If it is left blank, the program first searches the input folder and downloads terrain data only when no suitable DEM is available. Advanced WindNinja controls expose vegetation (`trees`, `grass`, `brush`), diurnal winds, non-neutral stability, optional stability alpha, optional uniform input wind height, station radius of influence, output clipping, thread count, and turbulence output.
+The UI also allows an explicit DEM file. If it is left blank, the program first searches the input folder and downloads terrain data only when no suitable DEM is available. Advanced controls expose vegetation (`trees`, `grass`, `brush`), diurnal winds, optional stability alpha, station radius of influence, output clipping, thread count, and two upstream options that are currently rejected by this project's point-initialization path (`non_neutral_stability` and `turbulence_output`). `input_wind_height` is passed to the generated configuration where accepted by the upstream branch; it does not rewrite station observation heights. See the [Chinese guide](docs/user_guide_zh.md) for radius semantics, DEM bounds behavior, height reference, and current limitations.
 
-Generic station files are also accepted: `.csv` and `.txt` files are automatically treated as station tables. The adapter recognizes common Chinese/English names for time, station, latitude, longitude, height, speed, direction, and temperature, supports long tables and multiple-height columns, and converts `km/h`, `mph`, `knots`, `cm`, and `ft` to the internal `m/s` and metre units. Use `inspect` first to review the detected station counts and time range before running.
+Generic station files are also accepted: `.csv` and `.txt` files are scanned for common Chinese/English time, station, latitude, longitude, height, speed, and direction columns. Long tables support explicit speed/height unit columns and conversion from `km/h`, `mph`, `knots`, `cm`, and `ft`; multiple-height wide tables should use integer metre heights and `m/s` speeds. The unit-converting long-table path currently does not read temperature columns, and the generic station `max_height_m` setting is not enforced. Use `inspect` first to review the detected station counts and time range before running.

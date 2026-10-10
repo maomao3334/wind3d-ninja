@@ -44,7 +44,9 @@ class Wind3DApp(tk.Tk):
         self.input_dir = tk.StringVar()
         self.output_dir = tk.StringVar()
         self.dem_path = tk.StringVar()
-        self.windninja_path = tk.StringVar(value=str(self.base_config.windninja_exe))
+        # Empty means "use the WindNinja bundled beside this installation".
+        # Only a deliberate file selection exposes a machine-specific path.
+        self.windninja_path = tk.StringVar()
         self.heights = tk.StringVar(value="10 20 50")
         self.resolutions = tk.StringVar(value="50 100 200")
         self.buffer_km = tk.StringVar(value="10")
@@ -95,7 +97,7 @@ class Wind3DApp(tk.Tk):
         self._path_row(
             basic_tab,
             3,
-            "WindNinja（安装包已内置）",
+            "WindNinja（默认使用安装包内置，可选自定义）",
             self.windninja_path,
             filetypes=[("WindNinja", "WindNinja_cli.exe"), ("程序", "*.exe")],
         )
@@ -304,9 +306,17 @@ class Wind3DApp(tk.Tk):
 
     def _runtime_config(self):
         config = load_config()
-        executable = Path(self.windninja_path.get().strip())
+        selected_path = self.windninja_path.get().strip()
+        executable = (
+            Path(selected_path).expanduser().resolve()
+            if selected_path
+            else config.windninja_exe
+        )
         if not executable.is_file():
-            raise ValueError(f"WindNinja 程序不存在：{executable}")
+            raise ValueError(
+                "未找到 WindNinja。请将完整安装目录一起移动，或先运行 "
+                "wind3d-ninja doctor --install。"
+            )
         windninja = replace(
             config.windninja,
             vegetation=self.vegetation.get(),

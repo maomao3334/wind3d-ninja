@@ -103,6 +103,22 @@ def test_generic_station_csv_adapter(tmp_path: Path) -> None:
     assert observations[0].time_utc.strftime("%H:%M") == "08:16"
 
 
+def test_generic_station_csv_adapter_reads_wide_height_columns(tmp_path: Path) -> None:
+    (tmp_path / "wide_station.csv").write_text(
+        "Date_time,Latitude,Longitude,28m WindSpeed,28m WindDirection,56m WindSpeed,56m WindDirection\n"
+        "2024-04-03 16:16:00,25.0255,102.3720,3.0,180,4.0,190\n",
+        encoding="utf-8",
+    )
+    from wind3d_ninja.readers.generic_station import GenericStationReader
+
+    observations = GenericStationReader(
+        tmp_path / "wide_station.csv", load_config().sources["generic_station"]
+    ).read()
+
+    assert [item.height_m for item in observations] == [28.0, 56.0]
+    assert [item.speed_ms for item in observations] == [3.0, 4.0]
+
+
 def test_auxiliary_csv_without_wind_columns_is_ignored(tmp_path: Path) -> None:
     path = tmp_path / "windmaster_auxiliary.csv"
     path.write_text(
@@ -114,6 +130,34 @@ def test_auxiliary_csv_without_wind_columns_is_ignored(tmp_path: Path) -> None:
     observations = GenericStationReader(
         path, load_config().sources["generic_station"]
     ).read()
+    assert observations == []
+
+
+def test_undecodable_auxiliary_text_is_ignored(tmp_path: Path) -> None:
+    path = tmp_path / "vendor-log.txt"
+    path.write_bytes(b"\xff\xfe\x00\x81\x80\x82")
+    from wind3d_ninja.readers.generic_station import GenericStationReader
+
+    observations = GenericStationReader(
+        path, load_config().sources["generic_station"]
+    ).read()
+
+    assert observations == []
+
+
+def test_generic_station_csv_without_height_is_ignored(tmp_path: Path) -> None:
+    path = tmp_path / "auxiliary.csv"
+    path.write_text(
+        "Date_time,Latitude,Longitude,WindSpeed,WindDirection\n"
+        "2024-04-03 16:16:00,25.0,102.0,3.0,180\n",
+        encoding="utf-8",
+    )
+    from wind3d_ninja.readers.generic_station import GenericStationReader
+
+    observations = GenericStationReader(
+        path, load_config().sources["generic_station"]
+    ).read()
+
     assert observations == []
 
 

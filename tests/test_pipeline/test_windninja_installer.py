@@ -24,9 +24,43 @@ class FakeResponse(io.BytesIO):
 
 def test_default_runtime_executable_respects_windninja_home(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("WINDNINJA_HOME", str(tmp_path))
+    executable = tmp_path / "bin" / "WindNinja_cli.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"fixture-cli")
 
     assert installer.default_runtime_executable() == tmp_path / "bin" / "WindNinja_cli.exe"
     assert load_config().windninja_exe == tmp_path / "bin" / "WindNinja_cli.exe"
+
+
+def test_invalid_machine_path_falls_back_to_bundled_runtime(tmp_path: Path, monkeypatch) -> None:
+    install_root = tmp_path / "portable"
+    executable = install_root / "ui" / "Wind3D-Ninja.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"fixture-ui")
+    bundled = install_root / "windninja" / "bin" / "WindNinja_cli.exe"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_bytes(b"fixture-cli")
+
+    monkeypatch.setattr(installer.sys, "executable", str(executable))
+    monkeypatch.setenv("WINDNINJA_BIN", str(tmp_path / "old-machine" / "WindNinja_cli.exe"))
+    monkeypatch.setenv("WINDNINJA_HOME", str(tmp_path / "old-machine"))
+
+    assert load_config().windninja_exe == bundled
+
+
+def test_bundled_runtime_root_is_relative_to_current_executable(tmp_path: Path, monkeypatch) -> None:
+    install_root = tmp_path / "portable"
+    executable = install_root / "cli" / "wind3d-ninja.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"fixture-cli")
+    bundled = install_root / "windninja" / "bin" / "WindNinja_cli.exe"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_bytes(b"fixture-windninja")
+
+    monkeypatch.setattr(installer.sys, "executable", str(executable))
+
+    assert installer.bundled_runtime_executable() == bundled
+    assert installer.default_runtime_root() == install_root / "windninja"
 
 
 def test_install_windninja_downloads_verifies_and_installs(tmp_path: Path, monkeypatch) -> None:

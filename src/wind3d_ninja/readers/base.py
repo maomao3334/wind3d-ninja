@@ -73,17 +73,39 @@ def frame_to_observations(
     lon_col = find_column(frame, "lon", required=False)
     station_col = find_column(frame, "station", required=False)
     temp_col = find_column(frame, "temperature", required=False)
-    speed_col = find_column(frame, "speed", required=False)
-    direction_col = find_column(frame, "direction", required=False)
     height_col = find_column(frame, "height", required=False)
 
-    pairs: list[tuple[Any, Any, float | None]] = []
-    if speed_col is not None and direction_col is not None:
-        pairs.append((speed_col, direction_col, None))
+    # Prefer explicit height-paired columns such as ``28m WindSpeed`` and
+    # ``28m WindDirection``.  ``find_column('speed')`` intentionally matches
+    # substrings, so resolving the scalar columns first would incorrectly grab
+    # only the first height and then fail because no single height column
+    # exists.
+    speeds = {
+        height: col
+        for col in frame.columns
+        if (height := _wide_height(col, True)) is not None
+    }
+    directions = {
+        height: col
+        for col in frame.columns
+        if (height := _wide_height(col, False)) is not None
+    }
+    wide_pairs = [
+        (speeds[height], directions[height], height)
+        for height in sorted(speeds.keys() & directions.keys())
+    ]
+    if wide_pairs:
+        pairs = wide_pairs
     else:
-        speeds = {height: col for col in frame.columns if (height := _wide_height(col, True)) is not None}
-        directions = {height: col for col in frame.columns if (height := _wide_height(col, False)) is not None}
-        pairs = [(speeds[height], directions[height], height) for height in sorted(speeds.keys() & directions.keys())]
+        speed_col = find_column(frame, "speed", required=False)
+        direction_col = find_column(frame, "direction", required=False)
+        if speed_col is not None and direction_col is not None and height_col is None:
+            raise ValueError(f"Missing height column; found {list(frame.columns)!r}")
+        pairs = (
+            [(speed_col, direction_col, None)]
+            if speed_col is not None and direction_col is not None
+            else []
+        )
     if not pairs:
         raise ValueError(f"No wind speed/direction columns found in {path}")
 

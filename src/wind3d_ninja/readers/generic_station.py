@@ -59,7 +59,14 @@ class GenericStationReader:
         raise ValueError(f"Unable to decode generic station file: {self.path}")
 
     def read(self) -> list[Observation]:
-        frame = self._frame().dropna(how="all")
+        try:
+            frame = self._frame().dropna(how="all")
+        except ValueError:
+            # Recursive scans also encounter vendor log/config text files.
+            # They are not station tables; an undecodable auxiliary file must
+            # not make inspect/plan fail for the whole input directory.
+            self.stats["invalid_rows"] = 1
+            return []
         self.stats["rows"] = len(frame)
         if frame.empty:
             return []
@@ -85,8 +92,10 @@ class GenericStationReader:
                 # Auxiliary CSV/TXT files often sit beside a WindMaster archive.
                 # They are not station tables and must not break inspect/plan.
                 message = str(error)
-                if message.startswith("Missing time column") or message.startswith(
-                    "No wind speed/direction columns found"
+                if (
+                    message.startswith("Missing time column")
+                    or message.startswith("Missing height column")
+                    or message.startswith("No wind speed/direction columns found")
                 ):
                     self.stats["invalid_rows"] = self.stats["rows"]
                     return []

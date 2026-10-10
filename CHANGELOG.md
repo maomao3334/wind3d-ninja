@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.3 - 2026-10-10
+
+- Fixed WindNinja 3.12.2 compatibility while preserving the default `pointInitialization` workflow for station observations.
+- Reject `turbulence_output` and `non_neutral_stability` before execution; omit momentum-only flags from the normal point-station configuration.
+- Made the Windows build script include the current checkout's `src` directory ahead of any stale editable Python install.
+- Rebuilt the portable UI/CLI and installer as `Wind3D-Ninja-Setup-1.0.3-x64.exe`.
+
+## v1.0.2 - 2026-09-23
+
+- Made bundled WindNinja discovery relocatable when an installation is copied to another computer.
+- Ignored stale machine-specific `WINDNINJA_BIN`/`WINDNINJA_HOME` values when the portable runtime is available.
+- Removed the default absolute WindNinja path from the desktop UI and made runtime errors use relative log references.
+
 ## v1.0.1 - 2026-09-23
 
 - Desktop UI time ranges now use dropdowns populated from timestamps found in the selected input data.

@@ -17,7 +17,7 @@ from .models import (
     TemperatureConfig,
     WindNinjaConfig,
 )
-from ..windninja.installer import default_runtime_executable
+from ..windninja.installer import bundled_runtime_executable, default_runtime_executable
 
 
 DEFAULTS: dict[str, Any] = {
@@ -115,25 +115,40 @@ def _default_file() -> Path | None:
 
 
 def _resolve_executable(value: str | Path, config_dir: Path) -> Path:
+    def resolve_candidate(candidate: str | Path) -> Path:
+        path = Path(candidate).expanduser()
+        if not path.is_absolute():
+            path = config_dir / path
+        return path.resolve()
+
     env_value = os.getenv("WINDNINJA_BIN")
     env_home = os.getenv("WINDNINJA_HOME")
-    executable_dir = Path(sys.executable).resolve().parent
-    bundled_candidates = [
-        root / "windninja" / "bin" / "WindNinja_cli.exe"
-        for root in (executable_dir, executable_dir.parent)
-    ]
-    bundled = next((candidate for candidate in bundled_candidates if candidate.is_file()), None)
+    explicit: list[Path] = []
     if env_value:
-        path = Path(env_value).expanduser()
-    elif env_home:
-        path = Path(env_home).expanduser() / "bin" / "WindNinja_cli.exe"
-    elif bundled is not None:
-        path = bundled
-    else:
-        path = Path(value).expanduser()
-    if not path.is_absolute():
-        path = (config_dir / path).resolve()
-    return path
+        explicit.append(resolve_candidate(env_value))
+    if env_home:
+        explicit.append(
+            resolve_candidate(Path(env_home).expanduser() / "bin" / "WindNinja_cli.exe")
+        )
+
+    # A valid environment override is explicit.  If an old environment or
+    # config path points back to another computer, use the bundled runtime
+    # discovered relative to the current executable instead.
+    configured = resolve_candidate(value)
+    bundled = bundled_runtime_executable()
+    # A valid explicit environment override wins.  Otherwise prefer the
+    # runtime shipped with this installation before any machine-specific
+    # default path from an older installation.
+    candidates = [*explicit]
+    if bundled is not None:
+        candidates.append(bundled)
+    candidates.append(configured)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    # Keep the most actionable path for doctor() when nothing exists.
+    return explicit[0] if explicit else configured
 
 
 def load_config(custom_path: Path | None = None) -> AppConfig:

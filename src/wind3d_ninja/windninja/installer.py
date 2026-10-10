@@ -49,17 +49,45 @@ class WindNinjaInstallResult:
         }
 
 
+def bundled_runtime_executable() -> Path | None:
+    """Find WindNinja bundled beside the current executable.
+
+    The released application keeps ``ui``/``cli`` and ``windninja`` under the
+    same installation root.  Resolving that relationship at runtime means the
+    complete folder can be moved to another computer without preserving a
+    build-machine path.
+    """
+
+    roots: list[Path] = []
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        roots.append(Path(bundle_root))
+    executable_dir = Path(sys.executable).expanduser().resolve().parent
+    roots.extend((executable_dir, executable_dir.parent))
+    # Also support a source checkout with a local windninja/ directory.
+    roots.append(Path(__file__).resolve().parents[3])
+
+    seen: set[Path] = set()
+    for root in roots:
+        root = root.resolve()
+        if root in seen:
+            continue
+        seen.add(root)
+        candidate = root / "windninja" / "bin" / "WindNinja_cli.exe"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def default_runtime_root() -> Path:
     configured = os.getenv("WINDNINJA_HOME")
     if configured:
         return Path(configured).expanduser()
     # Installed distributions place UI/CLI in a subdirectory and WindNinja
     # in the application root. Portable builds may place it beside the EXE.
-    executable_dir = Path(sys.executable).resolve().parent
-    for root in (executable_dir, executable_dir.parent):
-        bundled = root / "windninja"
-        if (bundled / "bin" / "WindNinja_cli.exe").is_file():
-            return bundled
+    bundled = bundled_runtime_executable()
+    if bundled is not None:
+        return bundled.parent.parent
     return Path.home() / ".wind3d-ninja" / "windninja" / WINDNINJA_VERSION
 
 
@@ -85,7 +113,7 @@ def _notify(callback: ProgressCallback | None, message: str) -> None:
 def _download_archive(destination: Path, progress: ProgressCallback | None = None) -> str:
     request = urllib.request.Request(
         WINDNINJA_DOWNLOAD_URL,
-        headers={"User-Agent": "wind3d-ninja/1.0.1"},
+        headers={"User-Agent": "wind3d-ninja/1.0.3"},
     )
     digest = hashlib.sha256()
     downloaded = 0
