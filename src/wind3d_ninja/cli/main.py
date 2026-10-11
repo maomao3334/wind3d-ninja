@@ -12,7 +12,7 @@ from ..pipeline.inspector import InputInspector
 from ..pipeline.planner import PipelinePlanner
 from ..pipeline.runner import PipelineRunner
 from ..utils.geometry import parse_bounds
-from ..utils.timezone import parse_time_range_utc
+from ..utils.timezone import parse_explicit_time_utc, parse_time_range_utc
 from ..windninja.installer import install_windninja
 from .doctor import doctor_report
 
@@ -47,6 +47,32 @@ def combine_heights(primary: tuple[int, ...], trailing: tuple[int, ...]) -> list
 def default_time_offset(config: Any) -> float:
     source = config.sources.get("uav") or next(iter(config.sources.values()))
     return float(source.tz_offset_hours)
+
+
+def turbulence_arguments(
+    mode: str,
+    background_speed_ms: float | None,
+    background_direction_deg: float | None,
+    background_height_m: float | None,
+    simulation_time: str | None,
+) -> dict[str, object]:
+    supplied = (background_speed_ms, background_direction_deg, background_height_m, simulation_time)
+    if mode == "stations":
+        if any(value is not None for value in supplied):
+            raise ValueError("Background wind options require --mode turbulence")
+        return {}
+    if any(value is None for value in supplied):
+        raise ValueError(
+            "Turbulence mode requires --background-speed-ms, --background-direction-deg, "
+            "--background-height-m, and --simulation-time"
+        )
+    return {
+        "solver_mode": "turbulence",
+        "background_speed_ms": background_speed_ms,
+        "background_direction_deg": background_direction_deg,
+        "background_height_m": background_height_m,
+        "simulation_time": parse_explicit_time_utc(simulation_time),
+    }
 
 
 @click.group(help="Multi-source WindNinja wind-field downscaling.")
@@ -125,6 +151,11 @@ def inspect(ctx: click.Context, input_dir: Path, config_path: Path | None) -> No
     metavar="START END",
     help="Inclusive output time range; timezone-less values use the configured source offset.",
 )
+@click.option("--mode", type=click.Choice(["stations", "turbulence"]), default="stations", show_default=True)
+@click.option("--background-speed-ms", type=float, help="Uniform background wind speed in m/s for turbulence mode.")
+@click.option("--background-direction-deg", type=float, help="Uniform wind-from direction in degrees [0, 360) for turbulence mode.")
+@click.option("--background-height-m", type=float, help="Background wind reference height in metres for turbulence mode.")
+@click.option("--simulation-time", type=str, help="Explicit ISO-8601 simulation time with timezone for turbulence mode.")
 @click.option("--config", "config_path", type=click.Path(path_type=Path, dir_okay=False))
 @click.pass_context
 def plan(
@@ -136,19 +167,32 @@ def plan(
     buffer_km: float,
     bounds: tuple[float, float, float, float] | None,
     time_range: tuple[str, str] | None,
+    mode: str,
+    background_speed_ms: float | None,
+    background_direction_deg: float | None,
+    background_height_m: float | None,
+    simulation_time: str | None,
     config_path: Path | None,
 ) -> None:
     config = load_config(config_path)
-    execute(
-        ctx,
-        lambda: PipelinePlanner(config).plan(
+    def operation() -> dict[str, object]:
+        mode_args = turbulence_arguments(
+            mode, background_speed_ms, background_direction_deg, background_height_m, simulation_time
+        )
+        if mode == "turbulence" and time_range is not None:
+            raise ValueError("--time-range cannot be used with --mode turbulence; use --simulation-time")
+        return PipelinePlanner(config).plan(
             input_dir,
             combine_heights(heights, additional_heights),
             list(mesh_resolutions),
             buffer_km,
             parse_bounds(bounds),
-            parse_time_range_utc(time_range, default_time_offset(config)),
-        ),
+            None if mode == "turbulence" else parse_time_range_utc(time_range, default_time_offset(config)),
+            **mode_args,
+        )
+    execute(
+        ctx,
+        operation,
     )
 
 
@@ -181,6 +225,11 @@ def plan(
     help="Inclusive output time range; timezone-less values use the configured source offset.",
 )
 @click.option("--kmz/--no-kmz", default=True, show_default=True)
+@click.option("--mode", type=click.Choice(["stations", "turbulence"]), default="stations", show_default=True)
+@click.option("--background-speed-ms", type=float, help="Uniform background wind speed in m/s for turbulence mode.")
+@click.option("--background-direction-deg", type=float, help="Uniform wind-from direction in degrees [0, 360) for turbulence mode.")
+@click.option("--background-height-m", type=float, help="Background wind reference height in metres for turbulence mode.")
+@click.option("--simulation-time", type=str, help="Explicit ISO-8601 simulation time with timezone for turbulence mode.")
 @click.option("--config", "config_path", type=click.Path(path_type=Path, exists=True, dir_okay=False))
 @click.pass_context
 def run(
@@ -194,13 +243,24 @@ def run(
     bounds: tuple[float, float, float, float] | None,
     time_range: tuple[str, str] | None,
     kmz: bool,
+    mode: str,
+    background_speed_ms: float | None,
+    background_direction_deg: float | None,
+    background_height_m: float | None,
+    simulation_time: str | None,
     config_path: Path | None,
 ) -> None:
     config = load_config(config_path)
     destination = output_dir or input_dir / config.output.default_output_dir_name
-    execute(
-        ctx,
-        lambda: PipelineRunner(config).run(
+    def operation() -> dict[str, object]:
+        mode_args = turbulence_arguments(
+            mode, background_speed_ms, background_direction_deg, background_height_m, simulation_time
+        )
+        if mode == "turbulence" and time_range is not None:
+            raise ValueError("--time-range cannot be used with --mode turbulence; use --simulation-time")
+        if mode == "turbulence" and not kmz:
+            raise ValueError("Turbulence mode requires KMZ output; remove --no-kmz")
+        return PipelineRunner(config).run(
             input_dir,
             destination,
             combine_heights(heights, additional_heights),
@@ -208,6 +268,10 @@ def run(
             buffer_km,
             parse_bounds(bounds),
             kmz,
-            time_range=parse_time_range_utc(time_range, default_time_offset(config)),
-        ).as_dict(),
+            time_range=None if mode == "turbulence" else parse_time_range_utc(time_range, default_time_offset(config)),
+            **mode_args,
+        ).as_dict()
+    execute(
+        ctx,
+        operation,
     )

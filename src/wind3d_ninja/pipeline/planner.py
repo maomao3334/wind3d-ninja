@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime
+from math import isfinite
 from pathlib import Path
 
 from ..config.models import AppConfig
 from ..dem.manager import DemManager
+from ..discovery.scanner import DataScanner
 from ..observations.models import Observation
 from ..postprocess.netcdf_writer import make_netcdf_filename
 from ..observations.coordinator import complete_coordinates
@@ -28,7 +30,51 @@ class PipelinePlanner:
         manual_bounds: GeoBounds | None,
         time_range: tuple[datetime, datetime] | None = None,
         dem_override: Path | None = None,
+        solver_mode: str = "stations",
+        background_speed_ms: float | None = None,
+        background_direction_deg: float | None = None,
+        background_height_m: float | None = None,
+        simulation_time: datetime | None = None,
     ) -> dict[str, object]:
+        if solver_mode == "turbulence":
+            scan = DataScanner(input_dir).scan()
+            if time_range is not None:
+                raise ValueError("Turbulence mode uses --simulation-time and cannot use --time-range")
+            self._validate_turbulence_inputs(
+                background_speed_ms, background_direction_deg, background_height_m, simulation_time
+            )
+            dem_manager = DemManager(self.config.dem)
+            if manual_bounds is not None:
+                candidates = [dem_override, *scan.dem] if dem_override is not None else scan.dem
+                dem_path = dem_manager.get_dem(candidates, [], buffer_km, manual_bounds)
+            elif dem_override is not None or scan.dem:
+                dem_path = dem_manager.get_local_dem(scan.dem, dem_override)
+            else:
+                raise ValueError("Turbulence mode requires a DEM file or --bounds to download one")
+            products = [
+                make_netcdf_filename(simulation_time, mesh_resolution_m, height)
+                for height in heights
+                for mesh_resolution_m in mesh_resolutions_m
+            ]
+            return {
+                "input_dir": str(input_dir.resolve()),
+                "files": scan.as_dict(),
+                "solver_mode": "turbulence",
+                "dem_path": dem_path,
+                "times_utc": [simulation_time],
+                "heights_m": heights,
+                "mesh_resolutions_m": mesh_resolutions_m,
+                "background_wind": {
+                    "speed_ms": background_speed_ms,
+                    "direction_from_deg": background_direction_deg,
+                    "height_m": background_height_m,
+                },
+                "run_count": len(products),
+                "products": products,
+                "turbulence_product": "WindNinja native KMZ",
+            }
+        if solver_mode != "stations":
+            raise ValueError("solver_mode must be 'stations' or 'turbulence'")
         loaded = InputInspector(self.config).load(input_dir)
         start_time, end_time = (
             (TimeAxis.normalize(time_range[0]), TimeAxis.normalize(time_range[1]))
@@ -108,3 +154,20 @@ class PipelinePlanner:
     @staticmethod
     def _progress(message: str) -> None:
         print(message, file=sys.stderr, flush=True)
+
+    @staticmethod
+    def _validate_turbulence_inputs(
+        speed: float | None,
+        direction: float | None,
+        height: float | None,
+        simulation_time: datetime | None,
+    ) -> None:
+        if simulation_time is None or simulation_time.tzinfo is None or simulation_time.utcoffset() is None:
+            raise ValueError("Turbulence mode requires a timezone-aware --simulation-time")
+        values = (speed, direction, height)
+        if any(value is None or not isfinite(value) for value in values):
+            raise ValueError("Turbulence mode requires finite background speed, direction, and height")
+        if speed <= 0 or height <= 0:
+            raise ValueError("Turbulence background speed and height must be greater than zero")
+        if not 0 <= direction < 360:
+            raise ValueError("Turbulence background direction must be in [0, 360)")

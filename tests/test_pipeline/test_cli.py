@@ -132,3 +132,28 @@ def test_run_generates_kmz_by_default(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert captured["generate_kmz"] is True
     assert captured["time_range"] is None
+
+
+def test_turbulence_cli_requires_all_background_inputs(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["run", str(tmp_path), "--height", "20", "--mode", "turbulence"],
+    )
+
+    assert result.exit_code != 0
+    assert "requires --background-speed-ms" in result.output
+
+
+def test_turbulence_cli_rejects_no_kmz(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        cli,
+        [
+            "run", str(tmp_path), "--height", "20", "--mode", "turbulence",
+            "--background-speed-ms", "8", "--background-direction-deg", "270",
+            "--background-height-m", "20", "--simulation-time", "2024-04-03T08:16:00Z",
+            "--no-kmz",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "requires KMZ output" in result.output

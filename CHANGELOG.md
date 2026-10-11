@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.4 - 2026-10-11
+
+- Supports non-neutral stability with point-initialized station observations, including validated explicit alpha bounds.
+- Adds an explicit turbulence workflow while preserving the existing station point-initialization workflow.
+- Keeps turbulence solver files in the run output's staged DEM area, so repeating a turbulence run does not modify a DEM-only input directory.
+- Prepares the Windows x64 installer for the updated workflows.
+
 ## v1.0.3 - 2026-10-10
 
 - Fixed WindNinja 3.12.2 compatibility while preserving the default `pointInitialization` workflow for station observations.

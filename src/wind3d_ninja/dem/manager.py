@@ -15,7 +15,7 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio.merge import merge
 from rasterio.transform import array_bounds
-from rasterio.warp import calculate_default_transform, reproject
+from rasterio.warp import calculate_default_transform, reproject, transform_bounds
 from pyproj import Transformer
 
 from ..config.models import DemConfig
@@ -68,6 +68,36 @@ class DemManager:
         if not self.covers(output, required) or not self.is_projected(output):
             raise ValueError(f"Downloaded DEM is not a projected raster covering required bounds: {output}")
         return output
+
+    def get_local_dem(self, scanned_dems: Iterable[Path], dem_override: Path | None = None) -> Path:
+        candidates = [dem_override, *scanned_dems] if dem_override is not None else list(scanned_dems)
+        paths = []
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            path = Path(candidate).expanduser().resolve()
+            if path.is_file() and path not in paths:
+                paths.append(path)
+        if not paths:
+            raise ValueError("Turbulence mode requires a DEM file in the input directory or a DEM override")
+        if len(paths) > 1 and dem_override is None:
+            raise ValueError("Turbulence mode found multiple DEM files; select one DEM explicitly")
+        source = paths[0]
+        if self.is_projected(source):
+            return source
+        with rasterio.open(source) as dataset:
+            if dataset.crs is None:
+                raise ValueError(f"DEM has no coordinate reference system: {source}")
+            min_lon, min_lat, max_lon, max_lat = transform_bounds(
+                dataset.crs, "EPSG:4326", *dataset.bounds, densify_pts=21
+            )
+        bounds = GeoBounds(min_lat, max_lat, min_lon, max_lon)
+        stat = source.stat()
+        digest = hashlib.sha256(f"{source},{stat.st_size},{stat.st_mtime_ns}".encode()).hexdigest()[:16]
+        projected = self.config.cache_dir.expanduser().resolve() / f"dem_projected_{digest}.tif"
+        if not projected.is_file() or not self.is_projected(projected):
+            self._project_dem(source, projected, bounds)
+        return projected
 
     @staticmethod
     def covers(path: Path, required: GeoBounds) -> bool:

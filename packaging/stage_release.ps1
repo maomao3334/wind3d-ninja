@@ -36,6 +36,8 @@ New-Item -ItemType Directory -Path $Stage | Out-Null
 Copy-Item -LiteralPath $UiSource -Destination (Join-Path $Stage "ui") -Recurse
 Copy-Item -LiteralPath $CliSource -Destination (Join-Path $Stage "cli") -Recurse
 Copy-Item -LiteralPath $WindNinjaSource -Destination (Join-Path $Stage "windninja") -Recurse
+New-Item -ItemType Directory -Path (Join-Path $Stage "docs") | Out-Null
+Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\user_guide_zh.md") -Destination (Join-Path $Stage "docs\user_guide_zh.md")
 
 # Keep the installer-facing UI name stable even though PyInstaller's portable
 # spec uses a lowercase executable name.
@@ -46,7 +48,7 @@ if (Test-Path -LiteralPath $stagedUi -PathType Leaf) {
 }
 
 $Readme = @(
-    "Wind3D Ninja 1.0.3"
+    "Wind3D Ninja 1.0.4"
     "===================="
     ""
     "Included:"

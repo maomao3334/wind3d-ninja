@@ -6,11 +6,13 @@ import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 from pathlib import Path
 from typing import Callable, Iterable
 
 from ..config.models import AppConfig
 from ..dem.manager import DemManager
+from ..discovery.scanner import DataScanner
 from ..manifest.builder import ManifestBuilder
 from ..observations.coordinator import complete_coordinates
 from ..observations.models import Observation
@@ -33,6 +35,7 @@ class PipelineRunResult:
     manifest: Path
     netcdf_files: tuple[Path, ...]
     kmz_files: tuple[Path, ...]
+    turbulence_kmz_files: tuple[Path, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -40,6 +43,7 @@ class PipelineRunResult:
             "manifest": str(self.manifest),
             "netcdf_files": [str(path) for path in self.netcdf_files],
             "kmz_files": [str(path) for path in self.kmz_files],
+            "turbulence_kmz_files": [str(path) for path in self.turbulence_kmz_files],
         }
 
 
@@ -61,6 +65,11 @@ class PipelineRunner:
         dem_override: Path | None = None,
         selected_times: Iterable[datetime] | None = None,
         time_range: tuple[datetime, datetime] | None = None,
+        solver_mode: str = "stations",
+        background_speed_ms: float | None = None,
+        background_direction_deg: float | None = None,
+        background_height_m: float | None = None,
+        simulation_time: datetime | None = None,
     ) -> PipelineRunResult:
         resolutions = (
             [mesh_resolutions_m]
@@ -69,6 +78,25 @@ class PipelineRunner:
         )
         if not resolutions or any(value <= 0 for value in resolutions):
             raise ValueError("At least one positive mesh resolution is required")
+        if solver_mode == "turbulence":
+            if selected_times is not None or time_range is not None:
+                raise ValueError("Turbulence mode uses simulation_time and cannot use selected_times or time_range")
+            return self._run_turbulence(
+                input_dir,
+                output_dir,
+                output_heights,
+                resolutions,
+                buffer_km,
+                manual_bounds,
+                generate_kmz,
+                dem_override,
+                background_speed_ms,
+                background_direction_deg,
+                background_height_m,
+                simulation_time,
+            )
+        if solver_mode != "stations":
+            raise ValueError("solver_mode must be 'stations' or 'turbulence'")
         output_dir = output_dir.expanduser().resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
         manifest = ManifestBuilder(output_dir / "manifest.json")
@@ -317,6 +345,166 @@ class PipelineRunner:
             manifest.add_error(error)
             manifest.write()
             raise
+
+    def _run_turbulence(
+        self,
+        input_dir: Path,
+        output_dir: Path,
+        output_heights: list[int],
+        resolutions: list[int],
+        buffer_km: float,
+        manual_bounds: GeoBounds | None,
+        generate_kmz: bool,
+        dem_override: Path | None,
+        background_speed_ms: float | None,
+        background_direction_deg: float | None,
+        background_height_m: float | None,
+        simulation_time: datetime | None,
+    ) -> PipelineRunResult:
+        if not generate_kmz:
+            raise ValueError("Turbulence mode requires KMZ output; remove --no-kmz")
+        if self.config.windninja.diurnal_winds:
+            raise ValueError("Turbulence mode is incompatible with diurnal_winds")
+        self._validate_turbulence_inputs(
+            background_speed_ms, background_direction_deg, background_height_m, simulation_time
+        )
+        output_dir = output_dir.expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        manifest = ManifestBuilder(output_dir / "manifest.json")
+        try:
+            scan = DataScanner(input_dir).scan()
+            dem_manager = DemManager(self.config.dem)
+            if manual_bounds is not None:
+                candidates = [dem_override, *scan.dem] if dem_override is not None else scan.dem
+                dem_path = dem_manager.get_dem(candidates, [], buffer_km, manual_bounds)
+            elif dem_override is not None or scan.dem:
+                dem_path = dem_manager.get_local_dem(scan.dem, dem_override)
+            else:
+                raise ValueError("Turbulence mode requires a DEM file or --bounds to download one")
+            dem_output = output_dir / "dem" / dem_path.name
+            dem_output.parent.mkdir(parents=True, exist_ok=True)
+            if dem_output.resolve() != dem_path.resolve():
+                shutil.copy2(dem_path, dem_output)
+            manifest.set("input_dir", input_dir.resolve())
+            manifest.set("solver_mode", "turbulence")
+            manifest.set("dem", dem_path.resolve())
+            manifest.set("times_utc", [simulation_time])
+            manifest.set("heights_m", output_heights)
+            manifest.set("mesh_resolutions_m", resolutions)
+            manifest.set(
+                "background_wind",
+                {
+                    "speed_ms": background_speed_ms,
+                    "direction_from_deg": background_direction_deg,
+                    "height_m": background_height_m,
+                },
+            )
+            manifest.set("turbulence_product", "WindNinja native KMZ")
+            manifest.add_input(dem_path, "dem_used")
+            config_writer = WindNinjaConfigWriter()
+            netcdf_writer = Wind3DNetcdfWriter(self.config.output.netcdf_compression)
+            kmz_writer = KmzWriter()
+            netcdf_files: list[Path] = []
+            kmz_files: list[Path] = []
+            total_runs = len(output_heights) * len(resolutions)
+            run_index = 0
+            time_key = TimeAxis.format_time_for_filename(simulation_time)
+            for height in output_heights:
+                height_key = f"h{height:03d}m"
+                for mesh_resolution_m in resolutions:
+                    run_index += 1
+                    resolution_key = f"r{mesh_resolution_m:04d}m"
+                    work_dir = output_dir / "windninja" / time_key / height_key / resolution_key
+                    config_file = config_writer.write(
+                        work_dir / "windninja.cfg",
+                        dem_output,
+                        work_dir / "unused_stations.csv",
+                        work_dir,
+                        simulation_time,
+                        height,
+                        mesh_resolution_m,
+                        self.config.windninja.vegetation,
+                        self.config.windninja.num_threads,
+                        True,
+                        diurnal_winds=False,
+                        non_neutral_stability=self.config.windninja.non_neutral_stability,
+                        alpha_stability=self.config.windninja.alpha_stability,
+                        output_buffer_clipping_pct=self.config.windninja.output_buffer_clipping_pct,
+                        solver_mode="turbulence",
+                        background_speed_ms=background_speed_ms,
+                        background_direction_deg=background_direction_deg,
+                        background_height_m=background_height_m,
+                    )
+                    self._progress(f"[wind3d] [{run_index}/{total_runs}] turbulence | starting WindNinja")
+                    wind_result = self.windninja_runner.run(config_file, work_dir)
+                    nc_path = output_dir / "nc" / make_netcdf_filename(
+                        simulation_time, mesh_resolution_m, height
+                    )
+                    netcdf_writer.write(
+                        wind_result.vel_asc,
+                        wind_result.ang_asc,
+                        wind_result.projection,
+                        nc_path,
+                        simulation_time,
+                        height,
+                        mesh_resolution_m,
+                    )
+                    kmz_path = output_dir / "kmz" / f"{nc_path.stem}_turbulence.kmz"
+                    kmz_writer.write_turbulence(kmz_path, wind_result.kmz)
+                    netcdf_files.append(nc_path)
+                    kmz_files.append(kmz_path)
+                    manifest.add_output(config_file, "windninja_config")
+                    manifest.add_output(wind_result.log_file, "windninja_log")
+                    manifest.add_output(wind_result.vel_asc, "wind_speed_ascii")
+                    manifest.add_output(wind_result.ang_asc, "wind_direction_ascii")
+                    manifest.add_output(nc_path, "netcdf_wind_field")
+                    manifest.add_output(kmz_path, "turbulence_kmz_native")
+                    manifest.add_run(
+                        {
+                            "solver_mode": "turbulence",
+                            "time_utc": simulation_time,
+                            "height_m": height,
+                            "mesh_resolution_m": mesh_resolution_m,
+                            "background_wind": {
+                                "speed_ms": background_speed_ms,
+                                "direction_from_deg": background_direction_deg,
+                                "height_m": background_height_m,
+                            },
+                            "command": wind_result.command,
+                            "netcdf": nc_path,
+                            "turbulence_kmz_native": kmz_path,
+                        }
+                    )
+            manifest_path = manifest.write()
+            return PipelineRunResult(
+                output_dir,
+                manifest_path,
+                tuple(netcdf_files),
+                tuple(kmz_files),
+                tuple(kmz_files),
+            )
+        except Exception as error:
+            self._progress(f"[wind3d] ERROR: {type(error).__name__}: {error}")
+            manifest.add_error(error)
+            manifest.write()
+            raise
+
+    @staticmethod
+    def _validate_turbulence_inputs(
+        speed: float | None,
+        direction: float | None,
+        height: float | None,
+        simulation_time: datetime | None,
+    ) -> None:
+        if simulation_time is None or simulation_time.tzinfo is None or simulation_time.utcoffset() is None:
+            raise ValueError("Turbulence mode requires a timezone-aware --simulation-time")
+        values = (speed, direction, height)
+        if any(value is None or not isfinite(value) for value in values):
+            raise ValueError("Turbulence mode requires finite background speed, direction, and height")
+        if speed <= 0 or height <= 0:
+            raise ValueError("Turbulence background speed and height must be greater than zero")
+        if not 0 <= direction < 360:
+            raise ValueError("Turbulence background direction must be in [0, 360)")
 
     def _progress(self, message: str) -> None:
         print(message, file=sys.stderr, flush=True)

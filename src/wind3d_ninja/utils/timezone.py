@@ -27,3 +27,19 @@ def parse_time_range_utc(
     if start > end:
         raise ValueError("Time range start must not be later than end")
     return start, end
+
+
+def parse_explicit_time_utc(value: str) -> datetime:
+    try:
+        normalized = value.strip().replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as error:
+        raise ValueError(
+            "Simulation time must be an ISO-8601 timestamp with a timezone, for example "
+            "2024-04-03T08:16:00Z"
+        ) from error
+    if parsed.tzinfo is None:
+        raise ValueError(
+            "Simulation time must include a timezone, for example 2024-04-03T08:16:00Z"
+        )
+    return parsed.astimezone(timezone.utc)

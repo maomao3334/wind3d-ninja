@@ -18,7 +18,7 @@ from ..pipeline.inspector import InputInspector
 from ..pipeline.planner import PipelinePlanner
 from ..pipeline.runner import PipelineRunner
 from ..utils.geometry import parse_bounds
-from ..utils.timezone import parse_time_range_utc
+from ..utils.timezone import parse_explicit_time_utc, parse_time_range_utc
 
 
 class Wind3DApp(tk.Tk):
@@ -27,8 +27,9 @@ class Wind3DApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Wind3D Ninja")
-        self.geometry("1040x820")
-        self.minsize(900, 700)
+        available_height = max(600, self.winfo_screenheight() - 100)
+        self.geometry(f"1040x{min(820, available_height)}")
+        self.minsize(900, 600)
         self.base_config = load_config()
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.worker: threading.Thread | None = None
@@ -54,6 +55,11 @@ class Wind3DApp(tk.Tk):
         self.end_time = tk.StringVar()
         self.bounds = tk.StringVar()
         self.generate_kmz = tk.BooleanVar(value=True)
+        self.solver_mode = tk.StringVar(value="stations（站点观测）")
+        self.background_speed = tk.StringVar()
+        self.background_direction = tk.StringVar()
+        self.background_height = tk.StringVar()
+        self.simulation_time = tk.StringVar()
         self.vegetation = tk.StringVar(value=self.base_config.windninja.vegetation)
         self.diurnal = tk.BooleanVar(value=False)
         self.non_neutral = tk.BooleanVar(value=False)
@@ -71,12 +77,12 @@ class Wind3DApp(tk.Tk):
             style.theme_use("vista")
         root = ttk.Frame(self, padding=10)
         root.pack(fill=tk.BOTH, expand=True)
-        notebook = ttk.Notebook(root)
-        notebook.pack(fill=tk.X)
-        basic_tab = ttk.Frame(notebook, padding=12)
-        advanced_tab = ttk.Frame(notebook, padding=12)
-        notebook.add(basic_tab, text="基本设置")
-        notebook.add(advanced_tab, text="WindNinja 高级设置")
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill=tk.X)
+        basic_tab = ttk.Frame(self.notebook, padding=12)
+        advanced_tab = ttk.Frame(self.notebook, padding=12)
+        self.notebook.add(basic_tab, text="基本设置")
+        self.notebook.add(advanced_tab, text="WindNinja 高级设置")
 
         self._path_row(
             basic_tab,
@@ -129,21 +135,36 @@ class Wind3DApp(tk.Tk):
             values=("trees", "grass", "brush"),
             state="readonly",
         ).grid(row=0, column=1, sticky=tk.EW, pady=5)
-        ttk.Checkbutton(
+        self.diurnal_control = ttk.Checkbutton(
             advanced_tab, text="启用日变化坡谷风", variable=self.diurnal
-        ).grid(row=1, column=1, sticky=tk.W, pady=5)
-        ttk.Checkbutton(
+        )
+        self.diurnal_control.grid(row=1, column=1, sticky=tk.W, pady=5)
+        self.non_neutral_control = ttk.Checkbutton(
             advanced_tab, text="启用非中性大气稳定度", variable=self.non_neutral
-        ).grid(row=2, column=1, sticky=tk.W, pady=5)
-        self._entry_row(advanced_tab, 3, "alpha_stability（可选）", self.alpha)
-        self._entry_row(advanced_tab, 4, "统一输入风高度（米，可选）", self.input_height)
-        self._entry_row(advanced_tab, 5, "站点影响半径（公里，-1=自动）", self.radius)
+        )
+        self.non_neutral_control.grid(row=2, column=1, sticky=tk.W, pady=5)
+        self._entry_row(advanced_tab, 3, "站点模式专用 alpha_stability（可选）", self.alpha)
+        self._entry_row(advanced_tab, 4, "站点模式专用统一输入风高度（米，可选）", self.input_height)
+        self._entry_row(advanced_tab, 5, "站点模式专用站点影响半径（公里，-1=无限影响）", self.radius)
         self._entry_row(advanced_tab, 6, "输出边缘裁剪（%）", self.clip)
         self._entry_row(advanced_tab, 7, "线程数", self.threads)
-        ttk.Checkbutton(
-            advanced_tab, text="输出 WindNinja 湍流结果", variable=self.turbulence
-        ).grid(row=8, column=1, sticky=tk.W, pady=5)
+        ttk.Label(advanced_tab, text="求解模式").grid(row=8, column=0, sticky=tk.W, padx=(0, 10), pady=5)
+        mode_selector = ttk.Combobox(
+            advanced_tab,
+            textvariable=self.solver_mode,
+            values=("stations（站点观测）", "turbulence（背景风动量）"),
+            state="readonly",
+        )
+        mode_selector.grid(row=8, column=1, sticky=tk.EW, pady=5)
+        mode_selector.bind("<<ComboboxSelected>>", lambda _event: self._on_mode_changed())
+        self.mode_hint = ttk.Label(advanced_tab, anchor=tk.W, wraplength=650)
+        self.mode_hint.grid(row=9, column=1, sticky=tk.W, pady=(0, 4))
+        self._entry_row(advanced_tab, 10, "湍流背景风速（m/s）", self.background_speed)
+        self._entry_row(advanced_tab, 11, "湍流背景来向（度，0-359）", self.background_direction)
+        self._entry_row(advanced_tab, 12, "湍流背景风参考高度（m）", self.background_height)
+        self._entry_row(advanced_tab, 13, "湍流模拟时刻（ISO-8601，含时区）", self.simulation_time)
         advanced_tab.columnconfigure(1, weight=1)
+        self._on_mode_changed()
 
         actions = ttk.Frame(root, padding=(0, 10, 0, 6))
         actions.pack(fill=tk.X)
@@ -160,7 +181,7 @@ class Wind3DApp(tk.Tk):
 
         self.progress = ttk.Progressbar(root, mode="indeterminate")
         self.progress.pack(fill=tk.X, pady=(0, 6))
-        self.log = scrolledtext.ScrolledText(root, height=22, wrap=tk.WORD, state=tk.DISABLED)
+        self.log = scrolledtext.ScrolledText(root, height=10, wrap=tk.WORD, state=tk.DISABLED)
         self.log.pack(fill=tk.BOTH, expand=True)
         ttk.Label(root, textvariable=self.status, anchor=tk.W).pack(fill=tk.X, pady=(5, 0))
 
@@ -227,12 +248,15 @@ class Wind3DApp(tk.Tk):
             raise ValueError("输出高度必须是正整数")
         if not resolutions or any(value <= 0 for value in resolutions):
             raise ValueError("分辨率必须是正整数")
-        start_display, end_display = self.start_time.get().strip(), self.end_time.get().strip()
-        start = self._time_lookup.get(start_display, start_display)
-        end = self._time_lookup.get(end_display, end_display)
-        if bool(start) != bool(end):
-            raise ValueError("开始时间和结束时间必须同时选择")
-        time_range = parse_time_range_utc((start, end), 8) if start else None
+        if self._is_turbulence():
+            time_range = None
+        else:
+            start_display, end_display = self.start_time.get().strip(), self.end_time.get().strip()
+            start = self._time_lookup.get(start_display, start_display)
+            end = self._time_lookup.get(end_display, end_display)
+            if bool(start) != bool(end):
+                raise ValueError("开始时间和结束时间必须同时选择")
+            time_range = parse_time_range_utc((start, end), 8) if start else None
         bounds = (
             parse_bounds(self.bounds.get().replace(",", " ").split())
             if self.bounds.get().strip()
@@ -250,6 +274,53 @@ class Wind3DApp(tk.Tk):
             bounds,
             dem,
         )
+
+    def _is_turbulence(self) -> bool:
+        return self.solver_mode.get().startswith("turbulence")
+
+    def _on_mode_changed(self) -> None:
+        if self._is_turbulence():
+            self.diurnal.set(False)
+            self.non_neutral.set(False)
+            self.alpha.set("")
+            self.start_time.set("")
+            self.end_time.set("")
+            self.generate_kmz.set(True)
+            self.mode_hint.configure(text="均匀背景风驱动动量求解。必须填写背景风和模拟时刻；KMZ 是原生湍流产品。")
+            self.diurnal_control.configure(state=tk.DISABLED)
+            self.non_neutral_control.configure(state=tk.DISABLED)
+        else:
+            self.mode_hint.configure(text="多个位置的实测风组织初始场。")
+            self.diurnal_control.configure(state=tk.NORMAL)
+            self.non_neutral_control.configure(state=tk.NORMAL)
+
+    def _turbulence_ui_args(self) -> dict[str, object]:
+        if not self._is_turbulence():
+            return {}
+        if not self.generate_kmz.get():
+            raise ValueError("湍流模式必须生成 KMZ")
+        fields = {
+            "背景风速（m/s）": self.background_speed.get().strip(),
+            "背景来向（度）": self.background_direction.get().strip(),
+            "背景参考高度（m）": self.background_height.get().strip(),
+            "模拟时刻（ISO-8601，含时区）": self.simulation_time.get().strip(),
+        }
+        missing = [label for label, value in fields.items() if not value]
+        if missing:
+            raise ValueError("湍流模式缺少：" + "、".join(missing))
+        try:
+            speed = float(fields["背景风速（m/s）"])
+            direction = float(fields["背景来向（度）"])
+            height = float(fields["背景参考高度（m）"])
+        except ValueError as error:
+            raise ValueError("背景风速、来向和参考高度必须是数字") from error
+        return {
+            "solver_mode": "turbulence",
+            "background_speed_ms": speed,
+            "background_direction_deg": direction,
+            "background_height_m": height,
+            "simulation_time": parse_explicit_time_utc(fields["模拟时刻（ISO-8601，含时区）"]),
+        }
 
     @staticmethod
     def _display_time(value: datetime) -> tuple[str, str]:
@@ -306,6 +377,7 @@ class Wind3DApp(tk.Tk):
 
     def _runtime_config(self):
         config = load_config()
+        turbulence_mode = self._is_turbulence()
         selected_path = self.windninja_path.get().strip()
         executable = (
             Path(selected_path).expanduser().resolve()
@@ -321,15 +393,21 @@ class Wind3DApp(tk.Tk):
             config.windninja,
             vegetation=self.vegetation.get(),
             num_threads=int(self.threads.get()),
-            diurnal_winds=self.diurnal.get(),
-            non_neutral_stability=self.non_neutral.get(),
-            alpha_stability=float(self.alpha.get()) if self.alpha.get().strip() else None,
-            input_wind_height_m=(
-                float(self.input_height.get()) if self.input_height.get().strip() else None
+            diurnal_winds=False if turbulence_mode else self.diurnal.get(),
+            non_neutral_stability=False if turbulence_mode else self.non_neutral.get(),
+            alpha_stability=(
+                None if turbulence_mode or not self.alpha.get().strip() else float(self.alpha.get())
             ),
-            station_radius_of_influence_km=float(self.radius.get()),
+            input_wind_height_m=(
+                None
+                if turbulence_mode or not self.input_height.get().strip()
+                else float(self.input_height.get())
+            ),
+            station_radius_of_influence_km=(
+                -1.0 if turbulence_mode else float(self.radius.get())
+            ),
             output_buffer_clipping_pct=float(self.clip.get()),
-            turbulence_output=self.turbulence.get(),
+            turbulence_output=False,
         )
         return replace(config, windninja_exe=executable, windninja=windninja)
 
@@ -411,13 +489,14 @@ class Wind3DApp(tk.Tk):
                 self._collect_common()
             )
             config = self._runtime_config()
+            turbulence_args = self._turbulence_ui_args()
         except Exception as error:
             messagebox.showerror("参数错误", str(error))
             return
         self._start_task(
             "正在生成计划…",
             lambda: PipelinePlanner(config).plan(
-                input_path, heights, resolutions, buffer_km, bounds, time_range, dem
+                input_path, heights, resolutions, buffer_km, bounds, time_range, dem, **turbulence_args
             ),
         )
 
@@ -434,6 +513,7 @@ class Wind3DApp(tk.Tk):
             )
             self.last_output_dir = output_path
             kmz = self.generate_kmz.get()
+            turbulence_args = self._turbulence_ui_args()
         except Exception as error:
             messagebox.showerror("参数错误", str(error))
             return
@@ -452,6 +532,7 @@ class Wind3DApp(tk.Tk):
                 kmz,
                 dem_override=dem,
                 time_range=time_range,
+                **turbulence_args,
             ).as_dict()
 
         self._start_task("正在运行 WindNinja…", operation)

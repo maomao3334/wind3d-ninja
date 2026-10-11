@@ -1,10 +1,10 @@
 # wind3d-ninja 中文使用指南
 
-适用于 `wind3d-ninja v1.0.3` 与随 Windows 安装包提供的 WindNinja `3.12.2`。本项目把 WindMaster ZIP、DAT、UAV 与通用站点表转换成点初始化站点文件，按有效观测分钟 × 输出高度 × 网格分辨率运行独立 WindNinja 作业，输出 NetCDF 和可选 KMZ。
+适用于 `wind3d-ninja v1.0.4` 与随 Windows 安装包提供的 WindNinja `3.12.2`。站点模式把 WindMaster ZIP、DAT、UAV 与通用站点表转换成点初始化站点文件，按有效观测分钟 × 输出高度 × 网格分辨率运行独立 WindNinja 作业，输出 NetCDF 和可选 KMZ。
 
 ## 安装与启动
 
-Windows 安装版无需另装 Python。双击 `Wind3D-Ninja-Setup-1.0.3-x64.exe` 安装。开始菜单桌面程序实际路径为安装目录下 `ui/Wind3D-Ninja.exe`；命令行程序为 `cli/wind3d-ninja.exe`。通常安装目录是 `%LOCALAPPDATA%\Programs\Wind3D-Ninja`。在 PowerShell 检查：
+Windows 安装版无需另装 Python。双击 `Wind3D-Ninja-Setup-1.0.4-x64.exe` 安装。开始菜单桌面程序实际路径为安装目录下 `ui/Wind3D-Ninja.exe`；命令行程序为 `cli/wind3d-ninja.exe`。通常安装目录是 `%LOCALAPPDATA%\Programs\Wind3D-Ninja`。在 PowerShell 检查：
 
 ```powershell
 $cli = "$env:LOCALAPPDATA\Programs\Wind3D-Ninja\cli\wind3d-ninja.exe"
@@ -118,11 +118,26 @@ $outputDir = "D:\wind\output"
 
 JSON 成功结果直接序列化命令的结果对象：`inspect` 包含 `input_dir`、`files`、`fixed_observations`、`generic_station_observations`、`uav_metadata_count`、`time_count`、`time_start_utc`、`time_end_utc`；`plan` 是计划对象，包含筛选时间、所需范围/DEM、任务和输出目标；`run` 包含 `output_dir`、`manifest`、`netcdf_files`、`kmz_files`。错误返回非零状态码，JSON 为 `{"ok": false, "error": {"type": "...", "message": "..."}}`。`doctor` 成功结构以健康状态、依赖和 WindNinja 可执行路径为核心；带 `--install` 时附带 `installation`。日志/进度写入 stderr，不属于成功 JSON 对象。
 
+### 湍流模式：独立的背景风动量求解
+
+`--mode turbulence` 不读取、筛选或平均任何站点观测。它以一个均匀背景风和 DEM 运行 WindNinja 动量求解器，适用于需要模型预测速度波动产品的单一时刻。输入目录可以只有一个 DEM；没有本地 DEM 时，必须用 `--bounds` 指定下载 DEM 的覆盖区域。
+
+四个背景条件均为必填：风速（m/s）、气象来向（0 至小于 360 度）、参考高度（m）和含时区的 ISO-8601 模拟时刻。不能使用 `--time-range`，也不能使用 `--no-kmz`。
+
+```powershell
+& $cli run D:\wind\dem-only --mode turbulence --height 10 --resolution 200 `
+  --background-speed-ms 8 --background-direction-deg 270 `
+  --background-height-m 20 --simulation-time "2024-04-03T08:16:00Z" `
+  --output D:\wind\turbulence-output
+```
+
+每个高度和分辨率仍是一次独立运行，但该模式只使用上述单一模拟时刻。NetCDF 仍是风速/风向风场；原生湍流产品是 `kmz/*_turbulence.kmz`，必须含 WindNinja 的 **Column Max Velocity Fluctuations** 图层，图例单位为 m/s。它是模型计算的列最大速度波动，不是 NetCDF 新增的 TKE 变量，也不能当作指定高度的瞬时阵风或实测阵风。
+
 ## 桌面界面
 
 安装包启动 `ui/Wind3D-Ninja.exe`。基本页包括输入目录、输出目录、可选 DEM/WindNinja 文件、输出高度、分辨率、buffer、开始/结束时间、可选 bounds、KMZ 勾选框。点击刷新时间后，下拉列表显示 UTC+8 时刻；选择范围两端均包含。高度和分辨率可用空格或逗号分隔。UI 初始高度为 `10 20 50`，分辨率 `50 100 200`，buffer `10`，KMZ 开启；与 CLI 默认分辨率 200 不同。
 
-高级页的控件包括主导植被（trees/grass/brush）、diurnal winds、non-neutral、alpha、统一输入风高、站点影响半径、边缘裁剪百分比、线程数和 turbulence output。只有植被和线程的初值读取基础配置（默认 trees、4）；三个开关初值均为关闭，alpha 和统一输入风高为空，影响半径为 -1，裁剪为 0。UI 会用这些控件值覆盖对应模型配置，不能假定它已继承 YAML 中其他高级值。先后使用“环境检查”“检查数据”“预览计划”“开始运行”可逐步确认结果。
+高级页可选“站点模式（观测风）”或“湍流模式（背景风动量求解）”。湍流模式要求填写专用的背景风速、来向、参考高度和含时区模拟时刻；切换后会清空观测时间并禁用 diurnal/non-neutral，KMZ 保持开启。alpha、统一输入风高和站点影响半径均标为站点模式专用，不会改写湍流背景高度。非中性稳定度支持点初始化；启用后可留空 alpha 让 WindNinja 按站点资料自动推断，或填写 `0 < alpha <= 5`。影响半径 `-1` 是无限影响半径。先后使用“环境检查”“检查数据”“预览计划”“开始运行”可逐步确认结果。
 
 ## 配置项
 
@@ -169,18 +184,18 @@ windninja:
 | `windninja.vegetation` | `trees` | 主导下垫面枚举：`grass`、`brush`、`trees`。不是逐像元土地覆盖图。 |
 | `windninja.num_threads` | `4` | WindNinja 线程数。 |
 | `windninja.diurnal_winds` | `false` | 请求日变化坡谷风计算；该热力流程未在本项目流水线验证。 |
-| `windninja.non_neutral_stability` | `false` | 当前项目点初始化明确拒绝启用；这是本项目实现限制，不代表上游 WindNinja 不支持。 |
-| `windninja.alpha_stability` | `null` | 可选稳定度参数；官方 CLI 源码对相关分支给出 `0 < alpha <= 5`。当前项目禁用非中性稳定度路径，建议留空；填写它不代表启用了稳定度计算。 |
+| `windninja.non_neutral_stability` | `false` | 启用 WindNinja 3.12.2 的点初始化非中性稳定度分支；默认关闭以保持既有中性结果。 |
+| `windninja.alpha_stability` | `null` | 可选稳定度参数，只能与 `non_neutral_stability: true` 一起使用，且必须满足 `0 < alpha <= 5`。留空时由上游按站点新格式资料自动推断。 |
 | `windninja.input_wind_height_m` | `null` | 写配置时传给上游 `input_wind_height`；官方 CLI 3.12.2 的点初始化分支不应用它。不会改写观测文件的 `Height`；每条记录仍用原始 `observation.height_m`。 |
 | `windninja.station_radius_of_influence_km` | `-1` | 站点影响半径 km，写入每个 station CSV。`-1` 是无限影响半径，不是自动选择。官方 point initialization 要求至少一个负 radius 才能保证空间全覆盖；全部使用有限正半径可能留下未覆盖区。 |
 | `windninja.output_buffer_clipping_pct` | `0` | 输出边缘裁剪百分比。 |
-| `windninja.turbulence_output` | `false` | 当前项目点初始化直接拒绝启用。上游 non-neutral stability 选项与动量求解器功能不可混为一谈。 |
+| `windninja.turbulence_output` | `false` | 旧配置字段；站点点初始化会拒绝启用。请使用 CLI/UI 的 `turbulence` 模式启动动量求解；非中性稳定度不等价于动量求解。 |
 | `output.default_output_dir_name` | `wind3d_output` | 默认结果目录名。 |
 | `output.netcdf_compression` | `true` | 是否对 NetCDF 风场变量启用 zlib level 4 压缩。 |
 | `output.netcdf_naming_format` | `Wind3D_{time}_{resolution}m_h{height:03d}m.nc` | 当前保留的配置字段；文件名由固定格式生成器产生，此字段尚未接入。 |
 | `output.kmz_colormap` | `viridis` | 当前保留字段；KMZ 沿用 WindNinja 原生输出，未应用此色带配置。 |
 
-`diurnal_winds`、`non_neutral_stability`、`alpha_stability` 是上游模型选项，不等价于已验证的热力建模能力。当前项目明确在生成 WindNinja 配置前拒绝 `non_neutral_stability=true` 或 `turbulence_output=true` 任一情形。虽然 WindNinja 3.12.2 上游在其他求解配置中有相应选项，但本项目点初始化路径尚不支持它们。不要将上游 non-neutral stability 描述成 momentum solver 本身。
+`diurnal_winds`、`non_neutral_stability`、`alpha_stability` 是上游模型选项，不等价于已验证的热力建模能力。当前项目支持 `non_neutral_stability=true` 的点初始化路径，但不会把站点观测静默改为域平均或动量求解。`turbulence_output=true` 仍会在生成配置前明确拒绝，因为其要求的动量求解与当前 pointInitialization 工作流不兼容。
 
 ## DEM、范围与高度语义
 
@@ -211,13 +226,13 @@ speed = sqrt(U_wind^2 + V_wind^2)
 | 检查不到有效观测 | 检查表头、时间、坐标、风速/风向、高度及数据源识别结果；先用最小长表排除格式问题。 |
 | 时间范围筛选结果为空 | 对照 `inspect` 的 UTC 时间；无时区 CLI 范围默认按 UTC+8 解释，可用带 `Z` 的 ISO 时间消除歧义。 |
 | DEM 不覆盖站点或无法下载 | 在输入目录放入覆盖需求范围的 DEM，或在 UI 显式选择；自动 SRTM 下载需网络且本实现纬度范围为 -60 至 60 度。 |
-| `pointInitialization cannot be combined...` | 将本项目的 `non_neutral_stability` 和 `turbulence_output` 设为 false；这是当前实现限制。 |
+| `pointInitialization cannot be combined...` | 站点模式保留 `non_neutral_stability`；关闭旧配置字段 `turbulence_output`。如需湍流产品，改用独立 `turbulence` 模式并提供背景风参数。 |
 | 单次运行耗时或占用内存很高 | 先预览任务数，减少时间/高度/分辨率组合或先用 200 m 网格；更小网格会增加计算量。 |
 | 结果域比 bounds 大 | 覆盖足够的已有 DEM 会全幅使用，bounds 不强制裁切；需要更小域时预先准备较小 DEM。 |
 | WindNinja 执行失败 | 检查输出目录下 `windninja/` 的该任务配置与日志，结合 `manifest.json` 定位；失败日志路径可随输出目录迁移。 |
 
 ## 官方依据与适用边界
 
-项目参数与初始化分支参照 [WindNinja 3.12.2 固定版本 CLI 源码](https://github.com/firelab/windninja/blob/94c20125a7e8850c543fc7b511469d2e27a97470/src/ninja/cli.cpp)；站点影响半径的负值语义参照同版本的 [pointInitialization.cpp](https://github.com/firelab/windninja/blob/94c20125a7e8850c543fc7b511469d2e27a97470/src/ninja/pointInitialization.cpp)。点初始化概念参考 [WindNinja Tutorial 3](https://ninjastorm.firelab.org/windninja/tutorials/WindNinja_tutorial3.pdf)；命令行和模型参数参考 [CLI Instructions](https://ninjastorm.firelab.org/windninja/tutorials/CLI_instructions.pdf)、[Tutorial 1](https://ninjastorm.firelab.org/windninja/tutorials/WindNinja_tutorial1.pdf)、[Tutorial 2](https://ninjastorm.firelab.org/windninja/tutorials/WindNinja_tutorial2.pdf)。在线教程会随上游版本更新（当前 Tutorial 3 示例为 WindNinja 4.0.0）；本项目兼容性以固定的 3.12.2 源码和本项目实现为准。上游通用能力不代表本项目 v1.0.3 的 pointInitialization 路径均已实现或验证。
+项目参数与初始化分支参照 [WindNinja 3.12.2 固定版本 CLI 源码](https://github.com/firelab/windninja/blob/94c20125a7e8850c543fc7b511469d2e27a97470/src/ninja/cli.cpp)；站点影响半径的负值语义参照同版本的 [pointInitialization.cpp](https://github.com/firelab/windninja/blob/94c20125a7e8850c543fc7b511469d2e27a97470/src/ninja/pointInitialization.cpp)。点初始化概念参考 [WindNinja Tutorial 3](https://ninjastorm.firelab.org/windninja/tutorials/WindNinja_tutorial3.pdf)；命令行和模型参数参考 [CLI Instructions](https://ninjastorm.firelab.org/windninja/tutorials/CLI_instructions.pdf)、[Tutorial 1](https://ninjastorm.firelab.org/windninja/tutorials/WindNinja_tutorial1.pdf)、[Tutorial 2](https://ninjastorm.firelab.org/windninja/tutorials/WindNinja_tutorial2.pdf)。在线教程会随上游版本更新（当前 Tutorial 3 示例为 WindNinja 4.0.0）；本项目兼容性以固定的 3.12.2 源码和本项目实现为准。上游通用能力不代表本项目 v1.0.4 的 pointInitialization 或 turbulence 路径均已实现或验证。
 
 本项目采用 MIT License。WindNinja 是独立上游软件，其随包再分发许可见仓库 `THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt`。

@@ -1,19 +1,92 @@
 # wind3d-ninja
 
-`wind3d-ninja` 是基于 WindNinja Point Initialization 的多源观测风场降尺度 CLI。
+`wind3d-ninja` 是基于 WindNinja 的观测风场降尺度与地形风场模拟工具。
 
-它自动识别 WindMaster ZIP、超声波 DAT、UAV XLS/XLSX 和 DEM，自动生成全部 UTC 分钟时间轴，并对每个“时间 × 高度 × 分辨率”执行独立 WindNinja 运行。
+默认的多站点模式自动识别 WindMaster ZIP、超声波 DAT、UAV XLS/XLSX 和 DEM，自动生成全部 UTC 分钟时间轴，并对每个“时间 × 高度 × 分辨率”执行独立 WindNinja 运行。独立湍流模式使用你明确给出的背景风和模拟时间。
+
+## 第一次使用：先弄清楚模式
+
+DEM 是地形高程图，告诉程序哪里有山、山有多高。观测文件则告诉程序在某个位置、时间和高度测到了多大的风。输出高度是你想查看的高度，网格分辨率是结果中每个格子的大小。
+
+| 模式或选项 | 用通俗的话解释 | 你需要准备什么 | 适合什么时候用 |
+|---|---|---|---|
+| 多站点模式（默认） | 把多个地点测到的风交给模型，再结合地形计算周围的风场 | 带时间、位置、观测高度、风速和风向的观测文件，以及 DEM | 你有 WindMaster、DAT、UAV 或站点表，希望利用这些观测生成风场 |
+| 非中性稳定度（多站点模式的附加选项） | 考虑空气更容易上下混合，或更不容易上下混合时，地形附近的风会怎样变化 | 多站点模式的输入；自动计算还会使用时间、位置、温度和云量信息 | 你希望考虑稳定度影响，并能判断温度、云量等输入或假设是否适合本次模拟 |
+| 湍流模式（独立的动量求解流程） | 给模型一个背景来风，让它计算风经过山地后的速度变化和湍流分布 | DEM、背景风速、风向、该风速对应的高度，以及模拟时间 | 你关注地形引起的复杂气流和湍流，并有可代表整个区域的背景风条件 |
+
+第一次处理自己的实测数据，先用默认的多站点模式。非中性稳定度不是一个全新的输入模式，而是给多站点计算增加一个物理选项。日变化风是另一个选项，用来考虑白天受热和夜间冷却形成的坡面风；它与稳定度的作用不同，也不代表完整的山谷环流或海陆风模拟。
+
+湍流模式使用独立的动量求解器。它的输入是明确给出的背景来风，不会自动把多个站点的风取平均；多站点观测也不会以原来的点初始化方式进入这次求解。当前 WindNinja 不支持把点初始化与动量求解器组合，也不支持在同一次动量求解中开启非中性稳定度。
+
+湍流产品是模型根据背景风、地形和湍流模型预测的结果，不能直接解释成某一秒会出现多大的实测阵风。两种模式各自依赖不同的输入和物理假设，不能仅凭“选项更多”判断哪种结果更可靠。
+
+项目默认采用 20°C 温度和 0% 云量；默认不会信任源文件温度，即使文件里有温度列也不保证会用于模型。这些是模型假设，不是实测天气。使用热力或稳定度选项前，应检查这些假设是否符合数据时刻；温度信任规则和云量假设可通过配置调整。手动 `alpha` 属于高级设置，不懂其含义时应使用经过输入检查的自动计算方式，而不是随意填写数值。
+
+模型依据参见官方的 [求解器说明](https://ninjastorm.firelab.org/windninja/howdoes/solvers.html)、[热力参数说明](https://ninjastorm.firelab.org/windninja/howdoes/thermal.html)和项目固定版本的 [CLI 源码](https://github.com/firelab/windninja/blob/94c20125a7e8850c543fc7b511469d2e27a97470/src/ninja/cli.cpp)。具体操作和当前支持范围见下方示例及 [中文使用指南](docs/user_guide_zh.md)。
+
+### 多站点模式：用自己的观测生成风场
+
+把原始观测放在 `input_data` 目录，直接运行：
+
+```bash
+wind3d-ninja run ./input_data --height 10 --output ./station_results
+```
+
+这是默认的 `--mode stations`，不写模式也可以。程序会从有效观测中取得时间和位置；DEM 优先使用输入目录中的文件，缺失或覆盖不足时自动下载。`--height 10` 表示输出 10 m 高度的风场，不会把观测仪器高度改成 10 m。
+
+要考虑非中性稳定度，可以在文本文件 `stability.yaml` 中写：
+
+```yaml
+windninja:
+  non_neutral_stability: true
+```
+
+然后在原命令后加配置文件：
+
+```bash
+wind3d-ninja run ./input_data --height 10 --output ./stable_results \
+  --config ./stability.yaml
+```
+
+省略 `alpha_stability` 时由 WindNinja 自动计算稳定度。请先确认温度和云量假设；手动指定 `alpha_stability` 时必须同时开启非中性稳定度，且数值满足 `0 < alpha <= 5`。稳定度选项已与动量求解选项分开，不需要开启湍流模式。
+
+### 湍流模式：用明确的背景来风做地形模拟
+
+在 `terrain_data` 目录放入 DEM，例如 `terrain.tif`。这个模式不要求站点表，也不会读取或平均目录中的观测。示例：
+
+```bash
+wind3d-ninja run ./terrain_data --mode turbulence \
+  --background-speed-ms 5 \
+  --background-direction-deg 270 \
+  --background-height-m 10 \
+  --simulation-time "2024-04-03T08:16:00Z" \
+  --height 10 --resolution 200 --output ./turbulence_results
+```
+
+| 必填输入 | 示例的意思 |
+|---|---|
+| `--background-speed-ms 5` | 背景风速为 5 m/s |
+| `--background-direction-deg 270` | 风从西边吹来；风向按气象来向解释 |
+| `--background-height-m 10` | 这份背景风速对应的参考高度为 10 m，按 WindNinja 植被以上高度定义 |
+| `--simulation-time ...Z` | 本次模拟的 UTC 时间；带 `Z` 的写法可以避免时区误解 |
+| `--height 10` | 想查看的输出高度；它与背景风参考高度分别设置 |
+
+这些风速、风向和时间只是语法示例，需要换成你这次模拟的真实背景条件。用同样参数把 `run` 改为 `plan` 可以先看执行计划。一个背景条件只对应明确给出的模拟时间；多个输出高度和分辨率会分别运行。
+
+湍流模式需要原生 KMZ 湍流产品，因此不能同时使用 `--no-kmz`。NetCDF 仍输出 `U_wind`、`V_wind`，不能把这两个变量当作湍流强度。模式会在 manifest 中标记背景风和求解器，帮助区分它与多站点结果。
+
+打开湍流 KMZ 后，可以查看原生的 `Column Max Velocity Fluctuations` 图层，图例标为 `Speed Fluctuation (m/s)`。这是列最大速度波动指标，用来查看模型预测的波动分布；不能直接当作某一秒的阵风，也不能仅凭文件名中的输出高度把列最大指标解释为该高度上的波动值。它不是 NetCDF 中新增的湍流动能变量。
 
 ## 核心行为
 
-1. 时间轴自动从全部有效观测中提取，正式运行不输入时间。
+1. 多站点模式的时间轴自动从全部有效观测中提取；湍流模式使用显式模拟时间。
 2. UAV 高度严格按 `(GPS 当前高度 + 对地高度) - DEM 高程` 转换为 AGL；DEM 会在 `plan` 阶段优先匹配或自动下载。
 3. 高度支持 `--height 10 20 50` 的空格分隔写法。
 4. DEM 优先从输入目录自动匹配；缺失或覆盖不足时自动下载 SRTM。
 5. `--output` 可指定输出目录；不写时输出到输入目录下的 `wind3d_output`。
 6. 支持一个或多个分辨率，以及自动缓冲区或手动覆盖范围。
 7. NetCDF 只保存 `U_wind` 和 `V_wind`；KMZ 默认同时生成。
-8. 每个目标时刻会将时间窗口内所有来源、所有有效高度的站点数据输入 WindNinja，再分别计算用户指定的输出高度层；不会只挑选某一个“优选高度”。
+8. 多站点模式在每个目标时刻会将时间窗口内所有来源、所有有效高度的站点数据输入 WindNinja，再分别计算用户指定的输出高度层；不会只挑选某一个“优选高度”。
 
 ## UAV 高度优化算法
 
@@ -90,12 +163,12 @@ export WINDNINJA_BIN="/path/to/WindNinja_cli.exe"
 
 ## Windows 最终安装包
 
-Windows 用户直接下载 GitHub Releases 中的 `Wind3D-Ninja-Setup-1.0.3-x64.exe`，双击安装即可。安装包已经包含 WindNinja 3.12.2、CLI、桌面 UI 和运行依赖，不需要另外安装 Python 或 WindNinja。
+Windows 用户直接下载 GitHub Releases 中的 `Wind3D-Ninja-Setup-1.0.4-x64.exe`，双击安装即可。安装包已经包含 WindNinja 3.12.2、CLI、桌面 UI 和运行依赖，不需要另外安装 Python 或 WindNinja。
 
 安装完成后可以从开始菜单启动 UI。CLI 位于安装目录下的 `cli/wind3d-ninja.exe`；Git Bash 示例：
 
 ```bash
-CLI="$HOME/AppData/Local/Programs/Wind3D-Ninja/cli/wind3d-ninja.exe"
+CLI="$LOCALAPPDATA/Programs/Wind3D-Ninja/cli/wind3d-ninja.exe"
 "$CLI" doctor
 "$CLI" run ./input_data --height 10 20 50 --resolution 100
 ```
@@ -112,7 +185,7 @@ wind3d-ninja plan ./input_data --height 10 20 50
 wind3d-ninja run ./input_data --height 10 20 50
 ```
 
-`plan` 和 `run` 都自动使用全部观测时次。
+默认多站点模式的 `plan` 和 `run` 自动使用全部有效观测时次；湍流模式使用 `--simulation-time` 指定的单个时刻。
 
 `run` 会实时显示任务总进度和 WindNinja 日志，例如：
 
@@ -124,7 +197,7 @@ wind3d-ninja run ./input_data --height 10 20 50
 
 ## 自定义输出时间区间
 
-不写 `--time-range` 时，自动处理全部观测时次。需要限制输出时间时，使用闭区间：
+多站点模式不写 `--time-range` 时，自动处理全部观测时次。需要限制输出时间时，使用闭区间：
 
 ```bash
 wind3d-ninja run ./input_data --height 10 20 50 \
@@ -200,7 +273,7 @@ KMZ 默认生成，并原样保留 WindNinja 生成的 KMZ 内容，只把文件
 
 UAV 高度严格使用上面的 GPS、对地高度和 DEM 算法。
 
-未知温度使用配置的 `20.0 C` 模型假设，并在 manifest 中标记为 `configured_model_assumption_not_observed`，不会伪装成实测温度。
+多站点模式未知温度使用配置的 `20.0 C` 模型假设，并在 manifest 中标记为 `configured_model_assumption_not_observed`，不会伪装成实测温度。
 
 详细说明：
 
@@ -211,7 +284,7 @@ UAV 高度严格使用上面的 GPS、对地高度和 DEM 算法。
 
 ## 版本与许可证
 
-当前固定版本为 `v1.0.3`。Windows 最终交付安装器为 `Wind3D-Ninja-Setup-1.0.3-x64.exe`，已内置 WindNinja 3.12.2；本项目使用 MIT License，WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
+当前固定版本为 `v1.0.4`。Windows 最终交付安装器为 `Wind3D-Ninja-Setup-1.0.4-x64.exe`，已内置 WindNinja 3.12.2；本项目使用 MIT License，WindNinja 是独立上游项目，其许可证和再分发声明见 [THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt](THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt)。
 
 ## Legacy 10 m converter
 
@@ -223,17 +296,19 @@ py -3.11 windninja_10m_pipeline.py convert \
   --direction-asc ./windninja_work/terrain_180_5_200m_ang.asc \
   --output ./output/windninja_10m.nc
 ```
-# Desktop UI
+## 桌面界面
 
-Install the optional Tk desktop interface from Git Bash:
+Windows 安装版可以从开始菜单打开界面；源码环境可在 Git Bash 中启动：
 
 ```bash
 py -3.11 -m pip install -e .
 wind3d-ninja-ui
 ```
 
-The window provides input/output folder selection, WindNinja executable selection, multiple heights and resolutions, buffer, manual bounds, KMZ toggle, and `doctor`/`inspect`/`plan`/`run` actions. After selecting an input folder, click `刷新可用时间`; the start/end time boxes are populated from timestamps actually found in the observations and are selected from dropdowns instead of typed manually. Run output is streamed into the log panel while the computation runs in a background thread.
+先选择模式，再填写输入和输出目录。多站点模式选择包含观测的目录后，可以点击“刷新可用时间”，从实际观测时间中选择开始和结束时刻。湍流模式使用包含 DEM 的目录，并填写背景风速、风向、参考高度和模拟时间。高度和分辨率都可以填写多个值；第一次试算建议各选一个值。
 
-The UI also allows an explicit DEM file. If it is left blank, the program first searches the input folder and downloads terrain data only when no suitable DEM is available. Advanced controls expose vegetation (`trees`, `grass`, `brush`), diurnal winds, optional stability alpha, station radius of influence, output clipping, thread count, and two upstream options that are currently rejected by this project's point-initialization path (`non_neutral_stability` and `turbulence_output`). `input_wind_height` is passed to the generated configuration where accepted by the upstream branch; it does not rewrite station observation heights. See the [Chinese guide](docs/user_guide_zh.md) for radius semantics, DEM bounds behavior, height reference, and current limitations.
+界面允许明确选择 DEM 文件。多站点模式中，留空时会搜索输入目录，没有合适 DEM 时再自动下载。湍流模式没有观测点来确定区域，应提供 DEM 或明确的覆盖范围。按“环境检查”“预览计划”“开始运行”可以先确认环境和任务数量；运行日志会实时显示在窗口中。
 
-Generic station files are also accepted: `.csv` and `.txt` files are scanned for common Chinese/English time, station, latitude, longitude, height, speed, and direction columns. Long tables support explicit speed/height unit columns and conversion from `km/h`, `mph`, `knots`, `cm`, and `ft`; multiple-height wide tables should use integer metre heights and `m/s` speeds. The unit-converting long-table path currently does not read temperature columns, and the generic station `max_height_m` setting is not enforced. Use `inspect` first to review the detected station counts and time range before running.
+高级选项包括植被、日变化风、非中性稳定度、手动 alpha、站点影响半径、边缘裁剪和线程数。非中性稳定度用于多站点模式；湍流由独立动量模式提供。旧的“统一输入风高”参数在当前点初始化分支不生效，建议留空；各条观测仍使用自身高度。湍流模式的背景风高度则由专用字段设置。具体参数和互斥关系见 [中文使用指南](docs/user_guide_zh.md)。
+
+多站点模式也支持通用 `.csv`、`.txt` 站点表，识别常用中英文时间、站名、纬度、经度、高度、风速和风向列。长表可以使用明确的单位列换算 `km/h`、`mph`、`knots`、`cm`、`ft`；多高度宽表建议使用整数米高度和 m/s 风速。通用长表的单位转换路径当前不读取温度列，`generic_station.max_height_m` 也尚未执行高度过滤；使用前可通过 `inspect` 核对站点数量和时间范围。

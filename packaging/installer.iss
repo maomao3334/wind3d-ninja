@@ -1,5 +1,5 @@
 #define MyAppName "Wind3D Ninja"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.4"
 #define MyAppPublisher "wind3d-ninja contributors"
 #define MyAppExeName "Wind3D-Ninja.exe"
 
@@ -15,7 +15,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=..\installer_output
-OutputBaseFilename=Wind3D-Ninja-Setup-1.0.3-x64
+OutputBaseFilename=Wind3D-Ninja-Setup-1.0.4-x64
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -23,7 +23,7 @@ UninstallDisplayIcon={app}\ui\{#MyAppExeName}
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
-VersionInfoVersion=1.0.3.0
+VersionInfoVersion=1.0.4.0
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 
@@ -32,6 +32,7 @@ Source: "..\installer_stage\ui\*"; DestDir: "{app}\ui"; Flags: ignoreversion rec
 Source: "..\installer_stage\cli\*"; DestDir: "{app}\cli"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\installer_stage\windninja\*"; DestDir: "{app}\windninja"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\installer_stage\README-FIRST.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\installer_stage\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD_PARTY_NOTICES\*"; DestDir: "{app}\THIRD_PARTY_NOTICES"; Flags: ignoreversion recursesubdirs createallsubdirs
 

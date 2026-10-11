@@ -19,7 +19,7 @@ if (-not (Test-Path -LiteralPath $Iscc -PathType Leaf)) {
         "/NORESTART"
         ("/DIR=" + $InnoRoot)
     )
-    $installProcess = Start-Process -FilePath $InnoInstaller -ArgumentList $installArgs -Wait -PassThru
+    $installProcess = Start-Process -FilePath $InnoInstaller -ArgumentList $installArgs -WindowStyle Hidden -Wait -PassThru
     if ($installProcess.ExitCode -ne 0) {
         throw "Inno Setup bootstrap installer failed with exit code $($installProcess.ExitCode)."
     }
@@ -34,7 +34,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "ISCC failed with exit code $LASTEXITCODE."
 }
 
-$Artifact = Join-Path $OutputDir "Wind3D-Ninja-Setup-1.0.3-x64.exe"
+$Artifact = Join-Path $OutputDir "Wind3D-Ninja-Setup-1.0.4-x64.exe"
 if (-not (Test-Path -LiteralPath $Artifact -PathType Leaf)) {
     throw "Installer artifact was not created: $Artifact"
 }
