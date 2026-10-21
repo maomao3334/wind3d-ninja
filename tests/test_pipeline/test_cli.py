@@ -157,3 +157,15 @@ def test_turbulence_cli_rejects_no_kmz(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "requires KMZ output" in result.output
+def test_native_assimilation_help_lists_coupled_controls():
+    result = CliRunner().invoke(cli, ["native-assimilation", "--help"])
+    assert result.exit_code == 0
+    for option in ("--native-runtime", "--station-observations", "--horizontal-radius-m",
+                   "--epsilon-relaxation-seconds", "--max-iterations", "--residual-tolerance"):
+        assert option in result.output
+
+
+def test_native_assimilation_requires_station_csv(tmp_path):
+    result = CliRunner().invoke(cli, ["native-assimilation", str(tmp_path), "--height", "50"])
+    assert result.exit_code == 2
+    assert "--station-observations" in result.output

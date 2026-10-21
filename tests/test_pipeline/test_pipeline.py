@@ -192,6 +192,8 @@ def test_pipeline_fixture(tmp_path: Path, capsys) -> None:
     }
     manifest = json.loads(result.manifest.read_text(encoding="utf-8"))
     assert manifest["mesh_resolutions_m"] == [100, 200]
+    assert manifest["instrument_time_policy"]["uav_time_field"] == "pc_collection_time"
+    assert manifest["instrument_time_policy"]["uav_timezone_offset_hours"] == 8.0
     assert {item["mesh_resolution_m"] for item in manifest["runs"]} == {100, 200}
     with nc.Dataset(result.netcdf_files[0]) as dataset:
         assert dataset.variables["height"][0] == 10
@@ -226,6 +228,7 @@ def test_planner_resolves_dem_before_uav_conversion(tmp_path: Path, monkeypatch)
     assert result["dem_path"] == dem_path
     assert result["uav_metadata_count"] == 1
     assert result["uav_observation_count"] == 1
+    assert result["instrument_time_policy"]["uav_time_field"] == "pc_collection_time"
     assert captured["observation_count"] == 3
     assert captured["buffer_km"] == 10.0
 
@@ -318,3 +321,15 @@ def test_turbulence_planner_checks_local_dem_against_manual_bounds(tmp_path: Pat
     assert result["dem_path"] == dem
     assert captured["observations"] == []
     assert captured["manual_bounds"] == bounds
+
+
+def test_instrument_catalog_skips_legacy_windmaster_reader(tmp_path, monkeypatch):
+    from wind3d_ninja.pipeline.inspector import InputInspector
+    from wind3d_ninja.readers.windmaster import WindMasterReader
+    create_inputs(tmp_path)
+    def legacy_read(self):
+        raise AssertionError("Native instrument archive must not be re-read by legacy table parser")
+    monkeypatch.setattr(WindMasterReader, "read", legacy_read)
+    loaded = InputInspector(load_config()).load(tmp_path)
+    assert any(item.source == "windmaster" for item in loaded.fixed_observations)
+    assert len(loaded.uav_inputs) == 1

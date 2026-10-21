@@ -77,12 +77,12 @@ def test_supported_readers(tmp_path: Path) -> None:
     )
     uav = uav_reader.read(dem_path=dem_path)
     assert len(uav) == 1
-    assert uav[0].height_m == 2.0
+    assert uav[0].height_m == 1.0
     assert uav[0].metadata["relative_height_m"] == 1.0
     assert "takeoff_elevation_m" not in uav[0].metadata
     assert uav[0].metadata["current_altitude_m"] == 101.0
     assert uav[0].metadata["dem_elevation_m"] == 100.0
-    assert uav[0].metadata["relative_plus_gps_altitude_m"] == 102.0
+    assert uav[0].metadata["aircraft_altitude_m"] == 101.0
 
 
 def test_uav_dem_agl_and_thresholds(tmp_path: Path) -> None:
@@ -139,10 +139,10 @@ def test_uav_dem_agl_and_thresholds(tmp_path: Path) -> None:
     )
     observations = reader.read(dem_path=dem_path)
 
-    assert [item.height_m for item in observations] == pytest.approx([0.1, 0.1, 0.1, 0.05, 18.0])
+    assert [item.height_m for item in observations] == pytest.approx([0.1, 0.1, 0.1, 0.05, 8.0])
     assert all("takeoff_elevation_m" not in item.metadata for item in observations)
     assert all(
         item.metadata["height_method"]
-        == "gps_current_altitude_plus_relative_height_minus_dem_elevation"
+        == "gps_aircraft_altitude_minus_dem_elevation"
         for item in observations
     )

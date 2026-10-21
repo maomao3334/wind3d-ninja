@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
@@ -12,6 +12,7 @@ from pyproj import Transformer
 
 from ..config.models import SourceConfig
 from ..observations.models import Observation
+from ..observations.instruments import InstrumentTimePolicy, parse_instrument_time_utc
 from ..utils.timezone import parse_datetime_utc
 from .base import as_float, find_column
 
@@ -30,12 +31,16 @@ class RawUavRecord:
     direction_deg: float
     temperature_c: float | None
     row: str
+    time_metadata: dict[str, object] = field(default_factory=dict)
 
 
 class UavReader:
-    def __init__(self, path: Path, config: SourceConfig):
+    def __init__(self, path: Path, config: SourceConfig, time_policy: InstrumentTimePolicy | None = None):
         self.path = path
         self.config = config
+        self.time_policy = time_policy or InstrumentTimePolicy(
+            uav_time_field="pc_collection_time", uav_timezone_offset_hours=config.tz_offset_hours
+        )
         self._raw: list[RawUavRecord] | None = None
 
     def read_metadata(self) -> list[RawUavRecord]:
@@ -51,7 +56,13 @@ class UavReader:
                 engine="python",
             ).dropna(how="all")
         positional = frame.shape[1] >= 22
-        time_col = frame.columns[21] if positional else find_column(frame, "time")
+        time_columns = {
+            "device_sampling_time": frame.columns[3] if positional else find_column(frame, "device_sampling_time", required=False),
+            "pc_collection_time": frame.columns[21] if positional else find_column(frame, "pc_collection_time", required=False),
+        }
+        time_col = time_columns.get(self.time_policy.uav_time_field)
+        if time_col is None:
+            return []
         lat_col = frame.columns[4] if positional else find_column(frame, "lat")
         lon_col = frame.columns[5] if positional else find_column(frame, "lon")
         speed_col = frame.columns[11] if positional else find_column(frame, "speed")
@@ -70,7 +81,10 @@ class UavReader:
         records: list[RawUavRecord] = []
         for index, row in frame.iterrows():
             try:
-                time_utc = parse_datetime_utc(row[time_col], self.config.tz_offset_hours)
+                raw_time = str(row[time_col]).strip()
+                time_utc = parse_instrument_time_utc(raw_time, self.time_policy.uav_timezone_offset_hours)
+                if time_utc is None:
+                    raise ValueError("selected UAV time field is invalid")
                 lat = as_float(row[lat_col], "latitude")
                 lon = as_float(row[lon_col], "longitude")
                 altitude = as_float(row[altitude_col], "GPS altitude")
@@ -98,6 +112,12 @@ class UavReader:
                     direction_deg=direction,
                     temperature_c=temperature,
                     row=str(index),
+                    time_metadata={
+                        "time_raw": raw_time,
+                        "time_source_field": self.time_policy.uav_time_field,
+                        "time_source_timezone_offset_hours": self.time_policy.uav_timezone_offset_hours,
+                        "time_utc": time_utc.isoformat().replace("+00:00", "Z"),
+                    },
                 )
             )
         self._raw = records
@@ -112,8 +132,9 @@ class UavReader:
         """Convert parsed UAV records to observations.
 
         ``dem_path`` is required because the runner resolves one terrain DEM
-        for the complete run.  AGL is calculated from the UAV GPS altitude,
-        relative height, and the sampled DEM elevation.
+        for the complete run. GPS altitude is the aircraft altitude above sea
+        level; AGL is aircraft GPS altitude minus local DEM elevation.
+        Relative-to-launch height is retained as metadata and is not added.
         """
         output: list[Observation] = []
         with rasterio.open(dem_path) as dem_dataset:
@@ -132,7 +153,7 @@ class UavReader:
                     and np.isclose(dem_elevation, dem_dataset.nodata)
                 ):
                     continue
-                agl_raw = raw.gps_altitude_m + raw.relative_height_m - dem_elevation
+                agl_raw = raw.gps_altitude_m - dem_elevation
                 if agl_raw < self.config.agl_threshold_drop_m:
                     continue
                 agl = (
@@ -140,7 +161,6 @@ class UavReader:
                     if agl_raw <= 0.0
                     else agl_raw
                 )
-                relative_plus_gps = raw.gps_altitude_m + raw.relative_height_m
                 metadata: dict[str, Any] = {
                     "input_file": str(self.path),
                     "row": raw.row,
@@ -148,10 +168,11 @@ class UavReader:
                     "current_altitude_m": raw.gps_altitude_m,
                     "gps_altitude_m": raw.gps_altitude_m,
                     "relative_height_m": raw.relative_height_m,
-                    "relative_plus_gps_altitude_m": relative_plus_gps,
+                    "aircraft_altitude_m": raw.gps_altitude_m,
                     "dem_elevation_m": dem_elevation,
                     "agl_raw_m": agl_raw,
-                    "height_method": "gps_current_altitude_plus_relative_height_minus_dem_elevation",
+                    "height_method": "gps_aircraft_altitude_minus_dem_elevation",
+                    **raw.time_metadata,
                 }
                 if raw.takeoff_elevation_m is not None:
                     metadata["takeoff_elevation_m"] = raw.takeoff_elevation_m

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import netCDF4 as nc
 import numpy as np
-from pyproj import CRS
+from pyproj import CRS, Geod, Transformer
 
 from wind3d_ninja.postprocess.netcdf_writer import Wind3DNetcdfWriter
 
@@ -46,7 +46,15 @@ def test_netcdf_writer(tmp_path: Path) -> None:
         assert dataset.variables["lat"].dimensions == ("lat",)
         assert dataset.variables["lon"].dimensions == ("lon",)
         assert dataset.variables["U_wind"].shape == (1, 2, 2)
-        assert np.nanmax(np.abs(dataset.variables["U_wind"][0])) < 1e-5
+        xx, yy = np.meshgrid(dataset["x"][:], dataset["y"][:])
+        transform = Transformer.from_crs(32648, 4326, always_xy=True)
+        lon, lat = transform.transform(xx, yy)
+        north_lon, north_lat = transform.transform(xx, yy + 0.1)
+        bearing, _, _ = Geod(ellps="WGS84").inv(lon, lat, north_lon, north_lat)
+        values = np.array([[1.0, 2.0], [3.0, 4.0]])
+        np.testing.assert_allclose(dataset["U_wind"][0], values * np.sin(np.deg2rad(bearing)), atol=1e-6)
+        np.testing.assert_allclose(dataset["V_wind"][0], values * np.cos(np.deg2rad(bearing)), atol=1e-6)
+        assert "true east/north" in dataset.wind_vector_reference
         assert np.all(dataset.variables["V_wind"][0] > 0)
         assert "wind_speed" not in dataset.variables
         assert "wind_from_direction" not in dataset.variables

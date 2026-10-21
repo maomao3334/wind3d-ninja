@@ -1,0 +1,5 @@
+from wind3d_ninja.cli.main import cli
+
+
+if __name__ == "__main__":
+    cli()

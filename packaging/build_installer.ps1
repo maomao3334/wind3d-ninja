@@ -1,57 +1,40 @@
+param(
+    [string]$AppDir,
+    [string]$IsccPath
+)
 $ErrorActionPreference = "Stop"
-
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$InnoRoot = Join-Path $ProjectRoot "installer_build\innosetup"
-$InnoInstaller = Join-Path $ProjectRoot "installer_build\innosetup-7.1.0-x64.exe"
-$Iscc = Join-Path $InnoRoot "ISCC.exe"
-$OutputDir = Join-Path $ProjectRoot "installer_output"
-
-if (-not (Test-Path -LiteralPath $Iscc -PathType Leaf)) {
-    New-Item -ItemType Directory -Path (Split-Path $InnoInstaller) -Force | Out-Null
-    if (-not (Test-Path -LiteralPath $InnoInstaller -PathType Leaf)) {
-        Invoke-WebRequest `
-            -Uri "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe" `
-            -OutFile $InnoInstaller
-    }
-    $installArgs = @(
-        "/VERYSILENT"
-        "/SUPPRESSMSGBOXES"
-        "/NORESTART"
-        ("/DIR=" + $InnoRoot)
-    )
-    $installProcess = Start-Process -FilePath $InnoInstaller -ArgumentList $installArgs -WindowStyle Hidden -Wait -PassThru
-    if ($installProcess.ExitCode -ne 0) {
-        throw "Inno Setup bootstrap installer failed with exit code $($installProcess.ExitCode)."
+if ([string]::IsNullOrWhiteSpace($AppDir)) { $AppDir = Join-Path $ProjectRoot "dist\Wind3D" }
+if ([string]::IsNullOrWhiteSpace($IsccPath)) {
+    $Compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($Compiler) { $IsccPath = $Compiler.Source }
+    else {
+        foreach ($Candidate in @(
+            (Join-Path $ProjectRoot "build/tools\InnoSetup\ISCC.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
+            (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
+        )) {
+            if (Test-Path -LiteralPath $Candidate -PathType Leaf) { $IsccPath = $Candidate; break }
+        }
     }
 }
-
-if (-not (Test-Path -LiteralPath $Iscc -PathType Leaf)) {
-    throw "ISCC.exe was not found after Inno Setup installation: $Iscc"
+if (-not $IsccPath -or -not (Test-Path -LiteralPath $IsccPath -PathType Leaf)) {
+    throw "Inno Setup compiler not found. Pass -IsccPath with an existing ISCC.exe."
 }
-
-& $Iscc (Join-Path $ProjectRoot "packaging\installer.iss")
-if ($LASTEXITCODE -ne 0) {
-    throw "ISCC failed with exit code $LASTEXITCODE."
-}
-
-$Artifact = Join-Path $OutputDir "Wind3D-Ninja-Setup-1.0.4-x64.exe"
-if (-not (Test-Path -LiteralPath $Artifact -PathType Leaf)) {
-    throw "Installer artifact was not created: $Artifact"
-}
-
-$File = Get-Item -LiteralPath $Artifact
-$sha256 = [System.Security.Cryptography.SHA256]::Create()
-$stream = [System.IO.File]::OpenRead($Artifact)
+& (Join-Path $PSScriptRoot "stage_release.ps1") -AppDir $AppDir
+$Version = (Get-Content -LiteralPath (Join-Path $AppDir "portable_app.json") -Encoding UTF8 -Raw | ConvertFrom-Json).version
+if ($Version -notmatch "^\d+\.\d+\.\d+$") { throw "Invalid application version in portable_app.json." }
+& $IsccPath ("/DMyAppVersion=" + $Version) (Join-Path $PSScriptRoot "installer.iss")
+if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed: $LASTEXITCODE" }
+$Setup = Join-Path $ProjectRoot ("installer_output\Wind3D-Ninja-Setup-" + $Version + ".exe")
+Get-Item -LiteralPath $Setup | Select-Object FullName, Length
+$Hasher = [System.Security.Cryptography.SHA256]::Create()
+$Stream = [System.IO.File]::OpenRead($Setup)
 try {
-    $Hash = ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+    $Digest = [System.BitConverter]::ToString($Hasher.ComputeHash($Stream)).Replace("-", "").ToLowerInvariant()
+    [PSCustomObject]@{ Algorithm = "SHA256"; Hash = $Digest; Path = $Setup }
 }
 finally {
-    $stream.Dispose()
-    $sha256.Dispose()
+    $Stream.Dispose()
+    $Hasher.Dispose()
 }
-[pscustomobject]@{
-    Artifact = $File.FullName
-    Bytes = $File.Length
-    SHA256 = $Hash
-    InnoCompiler = $Iscc
-} | Format-List

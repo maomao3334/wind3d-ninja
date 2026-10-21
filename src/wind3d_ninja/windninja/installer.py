@@ -73,9 +73,12 @@ def bundled_runtime_executable() -> Path | None:
         if root in seen:
             continue
         seen.add(root)
-        candidate = root / "windninja" / "bin" / "WindNinja_cli.exe"
-        if candidate.is_file():
-            return candidate
+        for candidate in (
+            root / "runtime" / "windninja" / WINDNINJA_VERSION / "bin" / "WindNinja_cli.exe",
+            root / "windninja" / "bin" / "WindNinja_cli.exe",
+        ):
+            if candidate.is_file():
+                return candidate
     return None
 
 
@@ -88,6 +91,8 @@ def default_runtime_root() -> Path:
     bundled = bundled_runtime_executable()
     if bundled is not None:
         return bundled.parent.parent
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "runtime" / "windninja" / WINDNINJA_VERSION
     return Path.home() / ".wind3d-ninja" / "windninja" / WINDNINJA_VERSION
 
 

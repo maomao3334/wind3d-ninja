@@ -29,18 +29,24 @@ class WindNinjaConfigWriter:
         background_speed_ms: float | None = None,
         background_direction_deg: float | None = None,
         background_height_m: float | None = None,
+        input_speed_ms: float | None = None,
+        input_direction_deg: float | None = None,
     ) -> Path:
+        if solver_mode == "stations" and turbulence_output:
+            if input_speed_ms is None or input_direction_deg is None:
+                raise ValueError(
+                    "WindNinja 3.12.2 turbulence output requires the momentum solver, which is "
+                    "incompatible with pointInitialization."
+                )
+            solver_mode = "turbulence"
+            background_speed_ms = input_speed_ms
+            background_direction_deg = input_direction_deg
+            background_height_m = input_wind_height_m
         if solver_mode not in {"stations", "turbulence"}:
             raise ValueError("solver_mode must be 'stations' or 'turbulence'")
-        if solver_mode == "stations" and turbulence_output:
-            raise ValueError(
-                "WindNinja 3.12.2 turbulence output requires the momentum solver, which is "
-                "incompatible with pointInitialization. This workflow keeps pointInitialization "
-                "to assimilate the input station observations."
-            )
         if solver_mode == "turbulence":
             if non_neutral_stability or alpha_stability is not None or diurnal_winds:
-                raise ValueError("Turbulence mode is incompatible with non_neutral_stability, alpha_stability, and diurnal_winds")
+                raise ValueError("Turbulence mode is incompatible with non_neutral_stability (non-neutral stability), alpha_stability, and diurnal_winds")
             values = (background_speed_ms, background_direction_deg, background_height_m)
             if any(value is None or not isfinite(value) for value in values):
                 raise ValueError("Turbulence mode requires finite background speed, direction, and height")

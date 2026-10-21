@@ -52,3 +52,5 @@ dist_ui/
 release/
 release_dllfix/
 release_final/
+# Portable native OpenFOAM binaries are produced by scripts/package_native_windows.py
+runtime/openfoam8/

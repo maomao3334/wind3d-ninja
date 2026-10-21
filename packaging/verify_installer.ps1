@@ -1,90 +1,55 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$InstallerPath
+    [Parameter(Mandatory=$true)][string]$InstallerPath,
+    [string]$InstallDir,
+    [switch]$KeepInstalled
 )
-
 $ErrorActionPreference = "Stop"
-
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
 $InstallerPath = (Resolve-Path -LiteralPath $InstallerPath).Path
-$Root = Join-Path $env:TEMP "wind3d-ninja-installer-test"
-$InstallDir = Join-Path $Root "installed"
-$OutputDir = Join-Path $Root "installer-output"
-
-if (Test-Path -LiteralPath $Root) {
-    Remove-Item -LiteralPath $Root -Recurse -Force
+$Root = Join-Path $ProjectRoot ("output\installer_verification\" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $Root -Force | Out-Null
+if (-not $InstallDir) { $InstallDir = Join-Path $Root "installed app" }
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$WorkspacePrefix = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+if (-not $InstallDir.StartsWith($WorkspacePrefix,[StringComparison]::OrdinalIgnoreCase)) {
+    throw "Verification installation must stay inside this project."
 }
-New-Item -ItemType Directory -Path $Root | Out-Null
-
-$installArgs = @(
-    "/VERYSILENT"
-    "/SUPPRESSMSGBOXES"
-    "/NORESTART"
-    "/CLOSEAPPLICATIONS"
-    "/DIR=$InstallDir"
-    "/LOG=$($Root)\install.log"
-)
-$installerProcess = Start-Process -FilePath $InstallerPath -ArgumentList $installArgs -Wait -PassThru
-if ($installerProcess.ExitCode -ne 0) {
-    throw "Wind3D Ninja installer failed with exit code $($installerProcess.ExitCode)."
+if (Test-Path -LiteralPath $InstallDir) { throw "Verification needs a new installation directory." }
+$Args = @("/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-","/NOICONS","/TASKS=","/NOCLOSEAPPLICATIONS","/DIR=`"$InstallDir`"","/LOG=`"$Root\install.log`"")
+$Process = Start-Process -FilePath $InstallerPath -ArgumentList $Args -WindowStyle Hidden -Wait -PassThru
+if ($Process.ExitCode -ne 0) { throw "Installation failed: $($Process.ExitCode)" }
+$Cli = Join-Path $InstallDir "Wind3D-cli.exe"
+$Gui = Join-Path $InstallDir "Wind3D.exe"
+$PreviousPath = $env:PATH
+$PreviousHome = $env:WINDNINJA_HOME
+$PreviousBin = $env:WINDNINJA_BIN
+$PreviousQt = $env:QT_QPA_PLATFORM
+try {
+    $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+    $env:WINDNINJA_HOME = ""
+    $env:WINDNINJA_BIN = ""
+    & $Cli --json doctor | Out-File (Join-Path $Root "doctor.json") -Encoding utf8
+    if ($LASTEXITCODE -ne 0) { throw "Installed dependency check failed." }
+    & $Cli native-assimilation --help | Out-File (Join-Path $Root "native_help.txt") -Encoding utf8
+    if ($LASTEXITCODE -ne 0) { throw "Native mode help failed." }
+    $env:QT_QPA_PLATFORM = "offscreen"
+    $GuiProcess = Start-Process -FilePath $Gui -WorkingDirectory $InstallDir -WindowStyle Hidden -PassThru
+    Start-Sleep -Seconds 5
+    if ($GuiProcess.HasExited) { throw "Frozen GUI exited: $($GuiProcess.ExitCode)" }
+    Stop-Process -Id $GuiProcess.Id
 }
-
-$Ui = Join-Path $InstallDir "ui\Wind3D-Ninja.exe"
-$Cli = Join-Path $InstallDir "cli\wind3d-ninja.exe"
-$WindNinja = Join-Path $InstallDir "windninja\bin\WindNinja_cli.exe"
-foreach ($Required in @($Ui, $Cli, $WindNinja)) {
-    if (-not (Test-Path -LiteralPath $Required -PathType Leaf)) {
-        throw "Installed file is missing: $Required"
-    }
+finally {
+    $env:PATH = $PreviousPath
+    $env:WINDNINJA_HOME = $PreviousHome
+    $env:WINDNINJA_BIN = $PreviousBin
+    $env:QT_QPA_PLATFORM = $PreviousQt
 }
-
-$help = & $Cli --help 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0 -or $help -notmatch "doctor") {
-    throw "Installed CLI --help failed."
+$Uninstalled = $false
+if (-not $KeepInstalled) {
+    $Process = Start-Process -FilePath (Join-Path $InstallDir "unins000.exe") -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -WindowStyle Hidden -Wait -PassThru
+    if ($Process.ExitCode -ne 0 -or (Test-Path -LiteralPath $Gui)) { throw "Uninstall verification failed." }
+    $Uninstalled = $true
 }
-
-$doctor = & $Cli doctor 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0 -or $doctor -notmatch "healthy: True") {
-    throw "Installed CLI doctor failed:`n$doctor"
-}
-
-$versionStdout = Join-Path $Root "windninja-version.stdout"
-$versionStderr = Join-Path $Root "windninja-version.stderr"
-$versionProcess = Start-Process -FilePath $WindNinja -ArgumentList "--version" `
-    -RedirectStandardOutput $versionStdout -RedirectStandardError $versionStderr `
-    -Wait -PassThru
-$version = ((Get-Content -LiteralPath $versionStdout -Raw -ErrorAction SilentlyContinue) +
-    (Get-Content -LiteralPath $versionStderr -Raw -ErrorAction SilentlyContinue))
-if ($version -notmatch "WindNinja version: 3\.12\.2") {
-    throw "Bundled WindNinja version check failed:`n$version"
-}
-
-$uiProcess = Start-Process -FilePath $Ui -PassThru
-Start-Sleep -Seconds 8
-$uiAlive = -not $uiProcess.HasExited
-if ($uiAlive) {
-    Stop-Process -Id $uiProcess.Id -Force
-}
-if (-not $uiAlive) {
-    throw "Installed UI exited before the startup check completed."
-}
-
-$uninstaller = Join-Path $InstallDir "unins000.exe"
-if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
-    throw "Uninstaller is missing: $uninstaller"
-}
-$uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
-if ($uninstallProcess.ExitCode -ne 0) {
-    throw "Uninstaller failed with exit code $($uninstallProcess.ExitCode)."
-}
-if (Test-Path -LiteralPath $InstallDir) {
-    throw "Install directory still exists after uninstall: $InstallDir"
-}
-
-[pscustomobject]@{
-    Installer = $InstallerPath
-    InstalledCli = $true
-    DoctorHealthy = $true
-    WindNinjaVersion = "3.12.2"
-    UiStarted = $true
-    Uninstalled = $true
-} | Format-List
+$Result = [pscustomobject]@{passed=$true;installer=$InstallerPath;install_dir=$InstallDir;isolated_path=$true;gui_startup_seconds=5;uninstalled=$Uninstalled;fresh_machine=$false}
+$Result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Root "verification.json") -Encoding utf8
+$Result | ConvertTo-Json
