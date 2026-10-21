@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import asdict
 from datetime import datetime
 from math import isfinite
 from pathlib import Path
@@ -9,6 +10,7 @@ from ..config.models import AppConfig
 from ..dem.manager import DemManager
 from ..discovery.scanner import DataScanner
 from ..observations.models import Observation
+from ..observations.instruments import InstrumentPolicy
 from ..postprocess.netcdf_writer import make_netcdf_filename
 from ..observations.coordinator import complete_coordinates
 from ..timeplan.axis import TimeAxis
@@ -35,6 +37,7 @@ class PipelinePlanner:
         background_direction_deg: float | None = None,
         background_height_m: float | None = None,
         simulation_time: datetime | None = None,
+        instrument_policy: InstrumentPolicy | None = None,
     ) -> dict[str, object]:
         if solver_mode == "turbulence":
             scan = DataScanner(input_dir).scan()
@@ -72,10 +75,12 @@ class PipelinePlanner:
                 "run_count": len(products),
                 "products": products,
                 "turbulence_product": "WindNinja native KMZ",
+                "instrument_time_policy": None,
             }
         if solver_mode != "stations":
             raise ValueError("solver_mode must be 'stations' or 'turbulence'")
-        loaded = InputInspector(self.config).load(input_dir)
+        inspector = InputInspector(self.config, instrument_policy)
+        loaded = inspector.load(input_dir)
         start_time, end_time = (
             (TimeAxis.normalize(time_range[0]), TimeAxis.normalize(time_range[1]))
             if time_range is not None
@@ -144,6 +149,7 @@ class PipelinePlanner:
             "dem_path": dem_path,
             "times_utc": times,
             "time_range_utc": time_range,
+            "instrument_time_policy": asdict(inspector.effective_instrument_policy().time_policy),
             "heights_m": heights,
             "mesh_resolutions_m": mesh_resolutions_m,
             "bounds": required_bounds.as_dict(),

@@ -4,18 +4,20 @@ import csv
 import json
 import shutil
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from math import isfinite
 from pathlib import Path
 from typing import Callable, Iterable
 
+from ..utils.windows_workspace import windows_safe_output, solver_safe_dem
 from ..config.models import AppConfig
 from ..dem.manager import DemManager
 from ..discovery.scanner import DataScanner
 from ..manifest.builder import ManifestBuilder
 from ..observations.coordinator import complete_coordinates
 from ..observations.models import Observation
+from ..observations.instruments import InstrumentPolicy
 from ..postprocess.kmz_writer import KmzWriter
 from ..postprocess.netcdf_writer import Wind3DNetcdfWriter, make_netcdf_filename
 from ..stations.list_file import StationListWriter
@@ -53,6 +55,7 @@ class PipelineRunner:
         self.windninja_runner = windninja_runner or WindNinjaRunner(config.windninja_exe)
         self.progress_callback = progress_callback
 
+    @windows_safe_output
     def run(
         self,
         input_dir: Path,
@@ -70,6 +73,7 @@ class PipelineRunner:
         background_direction_deg: float | None = None,
         background_height_m: float | None = None,
         simulation_time: datetime | None = None,
+        instrument_policy: InstrumentPolicy | None = None,
     ) -> PipelineRunResult:
         resolutions = (
             [mesh_resolutions_m]
@@ -102,7 +106,8 @@ class PipelineRunner:
         manifest = ManifestBuilder(output_dir / "manifest.json")
         try:
             self._progress(f"[wind3d] Scanning input: {input_dir.resolve()}")
-            loaded = InputInspector(self.config).load(input_dir)
+            inspector = InputInspector(self.config, instrument_policy)
+            loaded = inspector.load(input_dir)
             requested = (
                 {TimeAxis.normalize(value) for value in selected_times}
                 if selected_times is not None
@@ -182,6 +187,7 @@ class PipelineRunner:
                 f"{len(output_heights)} heights, {len(resolutions)} resolutions; "
                 f"total runs={total_runs}"
             )
+            dem_path = solver_safe_dem(dem_path, output_dir)
             dem_output = output_dir / "dem" / dem_path.name
             dem_output.parent.mkdir(parents=True, exist_ok=True)
             if dem_output.resolve() != dem_path.resolve():
@@ -192,6 +198,7 @@ class PipelineRunner:
             manifest.set("observation_summary", observation_summary(observations))
             manifest.set("times_utc", times)
             manifest.set("time_range_utc", normalized_range)
+            manifest.set("instrument_time_policy", asdict(inspector.effective_instrument_policy().time_policy))
             manifest.set("heights_m", output_heights)
             manifest.set("mesh_resolutions_m", resolutions)
             manifest.set("buffer_km", buffer_km)
@@ -381,6 +388,7 @@ class PipelineRunner:
                 dem_path = dem_manager.get_local_dem(scan.dem, dem_override)
             else:
                 raise ValueError("Turbulence mode requires a DEM file or --bounds to download one")
+            dem_path = solver_safe_dem(dem_path, output_dir)
             dem_output = output_dir / "dem" / dem_path.name
             dem_output.parent.mkdir(parents=True, exist_ok=True)
             if dem_output.resolve() != dem_path.resolve():
@@ -389,6 +397,7 @@ class PipelineRunner:
             manifest.set("solver_mode", "turbulence")
             manifest.set("dem", dem_path.resolve())
             manifest.set("times_utc", [simulation_time])
+            manifest.set("instrument_time_policy", None)
             manifest.set("heights_m", output_heights)
             manifest.set("mesh_resolutions_m", resolutions)
             manifest.set(

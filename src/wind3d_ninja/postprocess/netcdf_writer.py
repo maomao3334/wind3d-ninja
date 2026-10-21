@@ -8,6 +8,8 @@ import netCDF4 as nc
 import numpy as np
 from pyproj import CRS, Transformer
 
+from ..utils.wind_coordinates import grid_to_earth
+
 
 FILL_VALUE = np.float32(-9999.0)
 
@@ -53,7 +55,8 @@ def read_ascii_grid(path: Path) -> AsciiGrid:
         values = np.loadtxt(handle, dtype=np.float64)
     ncols = int(header["ncols"])
     nrows = int(header["nrows"])
-    values = np.atleast_2d(values)
+    if values.ndim < 2 and values.size == nrows * ncols:
+        values = values.reshape(nrows, ncols)
     if values.shape != (nrows, ncols):
         raise ValueError(f"Grid shape {values.shape} does not match {(nrows, ncols)}: {path}")
     x_key = "xllcenter" if "xllcenter" in header else "xllcorner"
@@ -86,16 +89,19 @@ class Wind3DNetcdfWriter:
         target_time: datetime,
         output_height_m: int,
         mesh_resolution_m: int,
+        solver_mode: str = "windninja_point_initialization",
     ) -> Path:
         speed = read_ascii_grid(vel_asc)
         direction = read_ascii_grid(ang_asc)
-        speed_geometry = (speed.ncols, speed.nrows, speed.xll, speed.yll, speed.cellsize)
+        speed_geometry = (speed.ncols, speed.nrows, speed.xll, speed.yll, speed.cellsize, speed.x_centered, speed.y_centered)
         direction_geometry = (
             direction.ncols,
             direction.nrows,
             direction.xll,
             direction.yll,
             direction.cellsize,
+            direction.x_centered,
+            direction.y_centered,
         )
         if speed_geometry != direction_geometry:
             raise ValueError("Wind speed and direction grids have different geometry")
@@ -114,6 +120,8 @@ class Wind3DNetcdfWriter:
         u_wind = -wind_speed * np.sin(radians)
         v_wind = -wind_speed * np.cos(radians)
         crs = CRS.from_wkt(projection.read_text(encoding="utf-8", errors="replace"))
+        xx, yy = np.meshgrid(speed.x, speed.y)
+        u_wind, v_wind = grid_to_earth(u_wind, v_wind, crs, xx, yy)
         transformer = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
         # The WindNinja grid is rectilinear in projected x/y coordinates.  Keep
         # those exact axes and expose 1-D geographic axes in the same shape as
@@ -138,18 +146,27 @@ class Wind3DNetcdfWriter:
         with nc.Dataset(output_nc, "w", format="NETCDF4") as dataset:
             dataset.Conventions = "CF-1.10"
             dataset.title = "WindNinja terrain-downscaled wind field"
-            dataset.source = "WindNinja point initialization"
+            dataset.source = ("WindNinja momentum solver, domain-average initialization"
+                              if solver_mode == "turbulence_rans_domain_average" else "WindNinja point initialization")
+            if solver_mode == "turbulence_rans_domain_average":
+                dataset.product_type = "mean_horizontal_wind"
+                dataset.turbulence_product = "native KMZ column maximum sqrt(2*k/3), in m/s"
+                dataset.validation_quantity = "mean horizontal wind; turbulence is supplied separately in native KMZ"
+                dataset.height_reference = "vegetation_top"
+            dataset.solver_mode = solver_mode
             dataset.target_time_utc = target_time.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             dataset.output_height_m = float(output_height_m)
             dataset.mesh_resolution_m = float(mesh_resolution_m)
             dataset.windninja_speed_grid = vel_asc.name
             dataset.windninja_direction_grid = ang_asc.name
+            dataset.wind_vector_reference = "true east/north; projected grid wind rotated using local meridian convergence"
             dataset.createDimension("height", 1)
             dataset.createDimension("lat", speed.nrows)
             dataset.createDimension("lon", speed.ncols)
             height = dataset.createVariable("height", "f4", ("height",))
             height.standard_name = "height"
-            height.long_name = "height above ground level"
+            height.long_name = ("height above vegetation top" if solver_mode == "turbulence_rans_domain_average"
+                                else "height above ground level")
             height.units = "m"
             height.positive = "up"
             height[:] = [output_height_m]

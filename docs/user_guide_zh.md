@@ -1,238 +1,149 @@
-# wind3d-ninja 中文使用指南
+# Wind3D 1.1.9 新功能使用说明
 
-适用于 `wind3d-ninja v1.0.4` 与随 Windows 安装包提供的 WindNinja `3.12.2`。站点模式把 WindMaster ZIP、DAT、UAV 与通用站点表转换成点初始化站点文件，按有效观测分钟 × 输出高度 × 网格分辨率运行独立 WindNinja 作业，输出 NetCDF 和可选 KMZ。
+## 安装与迁移
 
-## 安装与启动
+双击 `Wind3D-Ninja-Setup-1.1.9.exe`，选择安装位置，然后通过开始菜单或桌面上的 Wind3D 启动。默认路径为 `%LOCALAPPDATA%\Programs\Wind3D`，主程序是 `Wind3D.exe`。
 
-Windows 安装版无需另装 Python。双击 `Wind3D-Ninja-Setup-1.0.4-x64.exe` 安装。开始菜单桌面程序实际路径为安装目录下 `ui/Wind3D-Ninja.exe`；命令行程序为 `cli/wind3d-ninja.exe`。通常安装目录是 `%LOCALAPPDATA%\Programs\Wind3D-Ninja`。在 PowerShell 检查：
+中文、含空格或较长的输出目录会自动转到短 ASCII 工作区计算，完成后将结果、原生 case 和报告回存到所选目录。请确保临时磁盘和输出磁盘均有足够空间。默认优先在 ProgramData 下创建仅当前用户、管理员和系统可访问的独立工作区；也可用 WIND3D_WORK_ROOT 指定不超过 25 个字符且不含空格的本地 ASCII 根目录，例如 G:\Wind3DWork。过长或不可写的根目录不会被使用。
 
-```powershell
-$cli = "$env:LOCALAPPDATA\Programs\Wind3D-Ninja\cli\wind3d-ninja.exe"
-& $cli doctor
-& $cli --help
-```
+一个界面包含常规风场、湍流 RANS、逐站观测同化、原生 RANS 耦合同化四个模式。随包命令行 `Wind3D-cli.exe` 只供批处理和诊断使用。
 
-`doctor` 会报告依赖和实际解析到的 WindNinja 路径。迁移时复制整个 `Wind3D-Ninja` 安装目录，不能只拷贝单个 EXE 或 `cli` 子目录。源码开发环境可用 Python 3.10+ 执行 `py -3.11 -m pip install -e .`，再运行 `wind3d-ninja doctor --install` 安装项目固定的 WindNinja 3.12.2。
+目标电脑需 Windows 10/11 x64；无需安装 Python、WSL、Linux、OpenFOAM 或编译器。选择已有 DEM 可离线计算；缺少 DEM 时自动下载需要网络。软件没有捆绑您的原始观测数据。
 
-## Git Bash 快速操作
+便携迁移需复制整个 `Wind3D` 文件夹，包括 `_internal`、`runtime`、`licenses` 和对应源码压缩包，不能单独拷贝主程序 EXE。运行库按当前程序位置定位；有效的显式自定义路径仍可覆盖默认值。
 
-安装完成后，在 Git Bash 中先定义命令路径；如果安装时改了目录，替换下面的路径：
+## 先选对模式
 
-```bash
-cli="$LOCALAPPDATA/Programs/Wind3D-Ninja/cli/wind3d-ninja.exe"
-"$cli" doctor
-```
+先看下表，再填写首页。四种模式都计算给定高度上的风场；它们的区别在于背景风来自哪里、是否使用额外站点资料，以及输出能回答什么问题。
 
-把原始观测文件放在 `D:/wind/input`，直接运行：
+| 模式 | 适合解决什么问题 | 必需输入 | 可选输入 |
+|---|---|---|---|
+| **常规风场** | 用已有观测和地形生成多高度平均风场。适合日常制图或先检查资料。 | 至少一种受支持观测（WindMaster、DAT、UAV 或通用站点 CSV/TXT）、输出高度、分辨率。 | 已有 DEM、指定计算时段、KMZ。 |
+| **湍流模拟（RANS）** | 在中性条件下，用固定 WindMaster 剖面生成 RANS 平均风背景及软件的湍流产品。 | 逐站背景时需要固定 WindMaster 与 UAV 独立验证资料；或改选手动背景风。 | 已有 DEM、输出 KMZ、指定时段。 |
+| **逐站观测同化** | 先建立 WindMaster RANS 背景，再用附近固定站平均风作最优插值修正。 | 固定 WindMaster、UAV 独立验证、输出高度和分辨率。 | 附加固定站 CSV；不填写时只使用已读入的固定 WindMaster。 |
+| **原生 RANS 耦合同化** | 在 Windows 原生 RANS 方程中，对速度、k、epsilon 加入局地站点约束。 | 固定 WindMaster 背景、UAV 独立验证、**固定站 CSV**、输出高度和分辨率。CSV 至少一条记录必须提供可用的 `k_m2s2` 或完整三分量标准差，并提供 `epsilon_m2s3` 或 `mixing_length_m`。 | 自定义已验证运行库；可同时放入只含平均风的站点记录。 |
 
-```bash
-"$cli" run D:/wind/input -h 10 -o D:/wind/output
-```
+RANS 输出是时空平均风和模型参数化的湍流结果，不能解析一次飞行或一阵风中的瞬时涡旋。UAV 在研究模式中不参与背景构建和同化，而是在其真实位置、时间和高度采样，用于独立比较平均水平风；结果中的误差只描述这次比较，不保证任何模式的误差会降低。
 
-这条命令默认使用 200 m 网格、10 km 范围外扩，处理全部有效观测分钟并生成 NetCDF 和 KMZ；没有可用 DEM 时自动下载。`doctor`、`inspect`、`plan` 是排查工具，不要求每次运行前依次执行。
+## 四页界面：先在首页完成必要资料
 
-第一次试算可先检查时间，再把开始和结束设为同一分钟，以减少计算量：
+- **首页**：按“选择数据 → 确认时间 → 确认高度和风向（观测研究模式）→ 输出”的顺序填写。这里放必需文件、DEM、模式、输出高度、网格分辨率和开始按钮。
+- **高级设置**：放范围外扩、植被和 WindNinja 参数、剖面细节、验证窗口、同化半径与求解参数。第一次运行先保留默认值，只有掌握资料含义时才改。
+- **使用方法**：先讲当前模式是干什么的，再讲需要准备什么、一步一步怎么用和怎样查看结果；遇到不清楚的字段先回到此页确认。
+- **日志**：显示数据扫描、环境检查、运行进度和错误。任务开始后会自动切到此页。
 
-```bash
-"$cli" inspect D:/wind/input
-"$cli" run D:/wind/input -h 10 -r 200 \
-  --time-range "2024-04-04 00:16" "2024-04-04 00:16" \
-  -o D:/wind/output
-```
+首页的共同步骤如下。
 
-示例时间必须替换成自己数据中的有效时刻；没有时区的时间默认按 UTC+8 解释，`inspect` 返回的 UTC 时间可以保留 `Z` 后缀使用。多高度、多分辨率示例：
+1. **选择数据。** 选择输入文件夹和输出文件夹。输出目录建议与原始资料分开。已有 DEM 时选择覆盖整个计算范围的文件；不选时软件会根据资料位置和范围自动获取 DEM，因此需要网络。离线运行必须提供已有 DEM。
+2. **确认时间。** 除“湍流模拟（RANS）→ 手动输入背景风”外，先刷新观测时间，选择每种资料实际采用的时间字段与原始时区，核对“原始时间 → UTC”预览和各来源重叠范围，再选择开始、结束时刻。只算一个时刻时两者选同一时间；留空则使用可用时刻。
+3. **确认高度和风向。** 常规风场跳过这一步。湍流、逐站同化、原生耦合同化需要选择 WindMaster 高度、UAV 高度，以及风向是来向还是去向。导入数据统一按 m/s、地理风向和已完成运动补偿处理。手动背景风没有观测可校准，此步自动跳过。
+4. **设置输出。** 填输出高度（米，多个值用空格分隔）和网格分辨率（米）。第一次建议只选一个时刻、一个高度和较粗网格，确认资料与范围正确后再扩展。选择 KMZ 时才会生成 KMZ。
+5. 点击**开始运行**。输出、报告和错误说明都写入输出目录及“日志”页。
 
-```bash
-"$cli" run D:/wind/input -h 10 -h 20 -h 50 -r 100 -r 200 \
-  -o D:/wind/output --no-kmz
-```
+常规模式可使用 inspect/plan、站点影响半径、统一输入高度、非中性稳定度和 alpha。三种研究模式只支持中性条件；切换到研究模式时，日变化风、非中性稳定度和 alpha 会被取消并禁用。
 
-Git Bash 用行末 `\` 续行；后面的 PowerShell 示例使用反引号续行，不能混用。路径包含空格时必须加双引号。
+## 扫描后确认时间
 
-## 输入表格
+UAV 导出通常同时包含“设备取样时间”和“PC 采集时间”。二者可能使用不同的时钟，也可能包含记录延迟，软件不会根据误差大小自动替换。选择与本次测量对应的字段，再选择该字段原始值所用的时区。WindMaster 同样按扫描到的实际时间字段选择；DAT 使用单独的来源时区。
 
-将一次运行的原始文件放在一个输入目录中，程序递归扫描它。支持 ZIP 内 WindMaster `level2/*_Ave01min_*.csv`、DAT、UAV XLS/XLSX、CSV/TXT 通用站点表以及 GeoTIFF/ASCII/IMG DEM。避免把旧的输出目录放在输入目录下面，以免旧 CSV 等再次被扫描。
+例如，原始 `2024-04-03 16:06:00` 选择 UTC+8 后转换为 `2024-04-03T08:06:00Z`；原始数据若已经带 `Z` 或 `+08:00`，保留该显式时区，不重复平移。界面显示时区只改变时间列表的显示，不改变观测的 UTC 时刻。
 
-通用站点表至少需要时间、纬度、经度、风速、风向，以及高度。识别常用英文/中文别名，如 `time`/`timestamp`/`时间`、`lat`/`纬度`、`lon`/`经度`、`height`/`高度`、`speed`/`风速`、`direction`/`风向`。站名可选。通用长表的单位转换读取路径当前不读取温度列，不能依靠增加温度列就改变模型温度；默认使用配置中的假定温度。示例长表（UTF-8 CSV）：
+修改时间字段或来源时区后，重新确认预览及模拟时间。观察异常年份、缺失值和来源范围不重叠提示；已选择的字段缺失或无效时，该行被拒绝，不会静默改用另一个字段。设备年份异常不代表 PC 时间一定正确，应核对设备记录或采集日志。
 
-```csv
-time,station,lat,lon,height_m,speed_ms,direction_deg
-2024-04-04 00:16:00,STA_A,39.9000,116.3000,10,3.2,270
-2024-04-04 00:16:00,STA_B,39.9100,116.3100,20,4.1,285
-```
+这些设置同时用于扫描、常规计算、研究模式背景及 UAV 独立验证，并保存在结果报告中。手动背景风的模拟时间以及原生同化站点 CSV 的 `time_utc` 仍使用自身显式时区。
 
-长表可在每行提供 `speed_unit` 和 `height_unit` 列：风速单位支持 `km/h`、`kmh`、`kph`、`mph`、`kt`、`kts`、`knot`、`knots`，高度支持 `cm`、`ft`、`feet`。也能从列名中的 `kmh/km/h/kph`、`mph`、`knot/kts` 及 `cm/ft/feet` 推断单位；仅在列名中写 `kt` 不会触发节到 m/s 的转换，建议明确提供单位列。没有单位标记时按 m/s 与 m 解释。风向是气象来向，按度数输入：0°/360° 北风、90° 东风、180° 南风、270° 西风。宽表也支持每个高度一对风速/风向列：
+## 高度与风向定义
 
-```csv
-time,station,lat,lon,10m_WindSpeed,10m_WindDirection,20m_WindSpeed,20m_WindDirection
-2024-04-04 00:16:00,STA_A,39.9000,116.3000,3.2,270,4.1,285
-```
+本批数据已确认：UAV GPS 高度是飞行器海拔；文件中的“对地高度”实际相对起飞点；雷达位于地面。标准模式使用“飞行器 GPS 海拔 − 当地 DEM 高程”。
 
-宽表列名需包含高度数字以及 `speed`/`WindSpeed`、`direction`/`WindDirection`（或对应中文风速、风向）。宽表走另一条解析路径，请使用整数米高度、m/s 风速，不要依赖长表的单位列转换功能。通用 CSV/TXT 每行的无时区时间按 `sources.generic_station.tz_offset_hours` 解释（默认 UTC+8）；带 `Z` 的 ISO 时间是 UTC。WindMaster、DAT、UAV 分别使用各自 source 时区配置。观测时间转换为 UTC 后保留原始秒数，只有输出时间轴截断到分钟。WindMaster 和 DAT 默认用原始时间匹配目标分钟前后 120 秒内观测，同源同站多记录取距离目标时刻最近的一条；默认未配置时间窗口的其他源按同一分钟匹配。
+研究模式需显式选择 UAV 高度定义：
 
-WindMaster 默认只收录不高于 200 m 且 `DataObtainRate >= 0.8` 的数据；DAT 默认最大高度 200 m，速度除以 100 转成 m/s。UAV AGL 由 GPS 高程 + 对地高度 - DEM 高程计算：小于 -4 m 丢弃，[-4, 0] m 修正为 0.1 m。DEM 缺失时模型无法完成 UAV AGL 计算。通用站点的 `max_height_m` 配置默认 1000，但当前适配器没有执行这一高度上限，需自行预先过滤。
-
-## CLI 流程
-
-```powershell
-$cli = "$env:LOCALAPPDATA\Programs\Wind3D-Ninja\cli\wind3d-ninja.exe"
-$inputDir = "D:\wind\input"
-$outputDir = "D:\wind\output"
-& $cli doctor
-& $cli inspect $inputDir
-& $cli plan $inputDir --height 10
-& $cli run $inputDir --height 10 --output $outputDir
-```
-
-先用 `inspect` 检查识别文件、站点数量及时间范围；`plan` 显示所选时刻、范围、DEM、任务数和输出目标，但不运行 WindNinja；`run` 执行任务。计划作业数约为筛选后的有效时刻数 × 高度数 × 分辨率数。所有命令支持全局 `--json`，必须放在子命令之前，例如 `& $cli --json inspect $inputDir`。
-
-```powershell
-& $cli plan $inputDir --height 10 20 50 --resolution 50 --resolution 100
-& $cli run $inputDir --height 10 20 50 `
-  --resolution 50 --resolution 100 --buffer 10 `
-  --time-range "2024-04-04 00:16" "2024-04-04 00:30" `
-  --output $outputDir --no-kmz
-```
-
-`--height` 可重复，或在输入目录后追加其他高度；CLI 高度、分辨率必须为正整数米。`--resolution` 可重复，默认 200 m；`--buffer` 是非负公里值，默认 10 km。注意这两个 CLI 默认值由命令行硬编码，配置中的 `windninja.default_mesh_resolution_m/default_buffer_km` 不会覆盖它们。`--bounds MIN_LAT MAX_LAT MIN_LON MAX_LON` 手动定义所需 DEM 覆盖范围；`--time-range START END` 两端包含。无时区时间默认按 UAV source 时区（默认 UTC+8）解析，显式 `Z` 表示 UTC。PowerShell 含空格的时间字符串必须加引号。
-
-`doctor` 支持 `--config FILE`、`--install`、`--force`；`--force` 必须与 `--install` 同用。`inspect` 的 `INPUT_DIR` 必须是存在目录，可用 `--config FILE`。`plan`/`run` 都需要至少一个 `--height`；`run` 另有 `--output DIR`（默认输入目录下 `wind3d_output`）、`--kmz/--no-kmz`（默认生成 KMZ）和 `--config FILE`。准确语法以 `& $cli plan --help`、`& $cli run --help` 为准。
-
-| 参数 | 所属命令 | 默认值/用法 |
+| 选择 | 计算方式 | 需要的信息 |
 |---|---|---|
-| `--help` | 所有命令 | 查看对应命令帮助；`-h` 在 plan/run 中表示高度，不是帮助。 |
-| `--json` | 全局 | 放在子命令前，输出适合脚本读取的 JSON。 |
-| `INPUT_DIR` | inspect/plan/run | 必填，已经存在的输入目录。 |
-| `--config FILE` | doctor/inspect/plan/run | 加载 YAML；未写出的字段使用项目默认值。 |
-| `--install` | doctor | 安装固定 WindNinja 3.12.2 运行时；完整 Windows 安装版通常无需执行。 |
-| `--force` | doctor | 配合 `--install` 强制重装运行时。 |
-| `--height / -h` | plan/run | 必填，正整数米；可重复，如 `-h 10 -h 20`，也可 `--height 10 20 50`。这是输出高度，不是观测仪器高度。 |
-| `--resolution / -r` | plan/run | 默认 200 m，正整数；可重复，如 `-r 50 -r 100`，每个分辨率独立运行。 |
-| `--buffer / -b` | plan/run | 默认 10 km，非负值；在观测范围外增加 DEM 覆盖需求。 |
-| `--bounds` | plan/run | `MIN_LAT MAX_LAT MIN_LON MAX_LON`，以度为单位；指定 DEM 需求范围。 |
-| `--time-range` | plan/run | `START END`，包含两端；省略时使用全部有效观测分钟。 |
-| `--output / -o` | run | 默认 `INPUT_DIR/wind3d_output`；建议显式设置到输入目录之外。 |
-| `--kmz / --no-kmz` | run | 默认开启；只影响 KMZ，NetCDF 仍生成。 |
+| GPS 海拔减 DEM | 飞行器海拔 − 当地地形海拔 | GPS 与 DEM 的垂直基准必须一致 |
+| 相对起飞点 | 起飞地面海拔 + 相对高度 − 当地 DEM | 起飞经纬度或与 DEM 同基准的起飞地面海拔 |
+| 已确认相对 AGL | 直接使用真实当地对地高度 | 仅适用于已确认字段；相对起飞高度不能选择此项 |
 
-当前 CLI 没有 `--dem` 或单独的 `--time` 参数。显式选择 DEM 使用桌面界面；CLI 可把 DEM 放进输入目录供扫描。模型高级参数通过 YAML 或 UI 设置，没有对应的同名 CLI 开关。
+不能把飞行器 GPS 海拔再次加上相对起飞高度。研究模式统一站点剖面使用 U/V 分量，物理站点等权；默认不外推缺少覆盖的高度。外推需明确启用并核对粗糙度、位移高度和冠层高度。研究模式输入/输出参考高度是植被顶部以上高度，站点 CSV 中 `agl` 是地面以上高度，冠层高度非零时二者不同。
 
-JSON 成功结果直接序列化命令的结果对象：`inspect` 包含 `input_dir`、`files`、`fixed_observations`、`generic_station_observations`、`uav_metadata_count`、`time_count`、`time_start_utc`、`time_end_utc`；`plan` 是计划对象，包含筛选时间、所需范围/DEM、任务和输出目标；`run` 包含 `output_dir`、`manifest`、`netcdf_files`、`kmz_files`。错误返回非零状态码，JSON 为 `{"ok": false, "error": {"type": "...", "message": "..."}}`。`doctor` 成功结构以健康状态、依赖和 WindNinja 可执行路径为核心；带 `--install` 时附带 `installation`。日志/进度写入 stderr，不属于成功 JSON 对象。
+WindMaster 选择垂直高度门定义；平台对地高度默认 0 m，可改为实际安装高度。不要把斜距当作垂直高度。风向只需选择来向或去向，无需再重复确认地理方位和运动补偿。
 
-### 湍流模式：独立的背景风动量求解
+## 常规风场：先得到基础平均风场
 
-`--mode turbulence` 不读取、筛选或平均任何站点观测。它以一个均匀背景风和 DEM 运行 WindNinja 动量求解器，适用于需要模型预测速度波动产品的单一时刻。输入目录可以只有一个 DEM；没有本地 DEM 时，必须用 `--bounds` 指定下载 DEM 的覆盖区域。
+选择“常规风场”，在首页选择包含受支持观测的文件夹，依次确认时间、输出高度和分辨率。已有 DEM 直接选择；没有 DEM 时确认范围可由资料位置推得并保持联网。需要事先检查时，可在高级设置使用“检查数据”或“预览任务”。
 
-四个背景条件均为必填：风速（m/s）、气象来向（0 至小于 360 度）、参考高度（m）和含时区的 ISO-8601 模拟时刻。不能使用 `--time-range`，也不能使用 `--no-kmz`。
+输出为各目标时刻、目标高度和网格分辨率对应的风场 NetCDF；勾选 KMZ 时同时生成可查看的 KMZ。观测高度与输出高度不同并不表示软件测得了该高度，输出是模型在该高度的计算结果。
 
-```powershell
-& $cli run D:\wind\dem-only --mode turbulence --height 10 --resolution 200 `
-  --background-speed-ms 8 --background-direction-deg 270 `
-  --background-height-m 20 --simulation-time "2024-04-03T08:16:00Z" `
-  --output D:\wind\turbulence-output
+## 湍流模拟（RANS）：先选背景来源
+
+这个模式用 WindNinja 的 RANS 动量求解生成平均风背景，并输出软件提供的湍流产品。它不能替代高频三分量仪器对瞬时湍流或实测 TKE 的测量。
+
+### 逐站剖面生成背景
+
+1. 选择“湍流模拟（RANS）”，背景来源保持“逐站剖面生成背景”。输入文件夹必须同时有可用的固定 WindMaster 资料和 UAV 资料。
+2. 在首页确认 WindMaster 的时间；在高度和风向确认中明确 UAV 与 WindMaster 的高度、风向和单位。WindMaster 中不高于“背景最大高度”的高度门用于建立背景；UAV 只用于独立验证。
+3. 填输出高度、分辨率和 DEM。默认只运行一个可用的 WindMaster 背景时刻；需扩大时段或案例数时，到高级设置调整。
+4. 在高级设置检查参考高度、粗糙度、冠层和位移高度。默认不对缺少观测覆盖的高度做剖面外推；只有确认中性对数廓线适用时才允许外推。
+5. 运行后查看 `turbulence_report.json` 和 `validation.csv`。验证比较的是平均水平风。湍流 KMZ 是软件的扰动产品，不能把显示值当成观测 TKE；其中标注的量也不是指定输出高度的实测湍流。
+
+### 手动输入背景风
+
+当没有观测、只想按一个已知背景风测试地形响应时，选择“手动输入背景风”。首页填写风速、气象来向、植被顶部以上的背景高度和带时区的模拟时间（例如 `2024-04-03T08:06:00Z`）；还必须填写模拟范围、选择或自动获取覆盖该范围的 DEM，并勾选 KMZ。该路径不扫描观测时间，也不要求确认 UAV/WindMaster 高度和风向；它没有 UAV 独立验证结果。
+
+## 逐站观测同化：用额外平均风修正背景
+
+此模式先按上一节的 WindMaster 背景流程运行，再把固定站平均风按空间相关长度做最优插值分析。它修正背景风场，不会修改 RANS 方程，也不会把平均风直接当作 k。
+
+1. 选择“逐站观测同化”，准备 WindMaster 背景资料和 UAV 独立验证资料，并完成首页的时间、高度、风向、DEM 和输出设置。
+2. 如有独立固定站 CSV，在高级设置的“附加固定站点 CSV（可选）”中选择它。CSV 不填时，分析仍使用读入的固定 WindMaster；填写后，CSV 站点也作为局地平均风约束。
+3. 初次运行保留水平/垂直长度尺度和背景/观测风标准差的默认值。它们表达影响范围和不确定性，并非把站点值强行写满整个网格。
+4. 输出目录包含背景 NetCDF、分析 NetCDF、站点使用/创新信息和 UAV 验证表。检查每个站点是否落入有效网格和目标高度；无覆盖时先修正资料或高度定义。
+
+只有来源明确的 TKE 或三分量速度波动统计才可用于 k 分析；平均风和湍流 KMZ 的列最大显示量都不能代替 k。
+
+## 原生 RANS 耦合同化：速度与湍流量一起约束
+
+这个模式先建立与湍流模式相同的 WindMaster RANS 背景，再在 Windows 原生求解器的 U、k、epsilon 方程中加入固定站附近的局地源项。它适用于拥有可追溯湍流统计的研究资料；有限松弛只在影响半径内施加约束，不能保证网格值精确等于站点值。
+
+1. 选择“原生 RANS 耦合同化”，准备 WindMaster 背景、UAV 独立验证、DEM 和输出高度；按首页顺序确认时间、高度及仪器定义。
+2. 在首页选择**固定站点 CSV（必填）**。每行要有带时区的时间、WGS84 经纬度、高度及基准、水平风分量；可混入只约束速度的行，但整个 CSV 至少一条兼容记录必须有正的 `k_m2s2`（或完整三分量标准差），以及正的 `epsilon_m2s3` 或正的 `mixing_length_m`。缺少 `w_ms` 时按 0 处理并在报告中记录。
+3. 在高级设置保留随包运行库；只有验证过兼容性时才选择自定义运行库。首次使用默认的影响半径、松弛时间、最大迭代次数和残差容差。
+4. 运行完成后查看 `native_report.json`、`nc/*.nc`、原生 case/日志和 UAV 验证表。`converged=true` 仅说明本次求解满足残差和物理量检查，不证明真实湍流精度提高。
+
+每个站点通过其三维位置和影响半径约束附近单元；重叠区域中的源项会叠加。只提供速度的站点只能直接约束 U；至少一个兼容站点必须同时提供 k 与 epsilon（或由混合长度换算的 epsilon），才能启动耦合同化。
+
+CSV 示例（数值仅演示格式，使用前替换为实测资料）：
+
+```csv
+station_id,time_utc,latitude,longitude,height_m,height_reference,u_ms,v_ms,w_ms,k_m2s2,epsilon_m2s3
+S01,2024-04-03T08:06:00Z,25.05,102.40,50,agl,-4,1,0,0.8,0.01
 ```
 
-每个高度和分辨率仍是一次独立运行，但该模式只使用上述单一模拟时刻。NetCDF 仍是风速/风向风场；原生湍流产品是 `kmz/*_turbulence.kmz`，必须含 WindNinja 的 **Column Max Velocity Fluctuations** 图层，图例单位为 m/s。它是模型计算的列最大速度波动，不是 NetCDF 新增的 TKE 变量，也不能当作指定高度的瞬时阵风或实测阵风。
+字段定义：
 
-## 桌面界面
+- `station_id`：物理站点编号；`time_utc`：带时区时间；`latitude/longitude`：WGS84 经纬度。
+- `height_m` 和 `height_reference`：高度及其基准（`agl` 或 `msl`）。
+- `u_ms/v_ms/w_ms`：地理风矢量分量（东、北、上），m/s；缺少 w 时使用 0，并记录该假设。
+- `k_m2s2`：湍动能，m²/s²；`epsilon_m2s3`：耗散率，m²/s³。
+- 也可按详细方法说明提供三个速度分量标准差及耗散率/混合长度。单个风速标准差不能直接转换成三分量 TKE。
 
-安装包启动 `ui/Wind3D-Ninja.exe`。基本页包括输入目录、输出目录、可选 DEM/WindNinja 文件、输出高度、分辨率、buffer、开始/结束时间、可选 bounds、KMZ 勾选框。点击刷新时间后，下拉列表显示 UTC+8 时刻；选择范围两端均包含。高度和分辨率可用空格或逗号分隔。UI 初始高度为 `10 20 50`，分辨率 `50 100 200`，buffer `10`，KMZ 开启；与 CLI 默认分辨率 200 不同。
+同一站点、相同高度/基准有多个时刻时，按目标时刻最近的兼容观测选取；不将相同站点的重复记录无限叠加。观测时间窗口之外的记录不用于该时刻同化。
 
-高级页可选“站点模式（观测风）”或“湍流模式（背景风动量求解）”。湍流模式要求填写专用的背景风速、来向、参考高度和含时区模拟时刻；切换后会清空观测时间并禁用 diurnal/non-neutral，KMZ 保持开启。alpha、统一输入风高和站点影响半径均标为站点模式专用，不会改写湍流背景高度。非中性稳定度支持点初始化；启用后可留空 alpha 让 WindNinja 按站点资料自动推断，或填写 `0 < alpha <= 5`。影响半径 `-1` 是无限影响半径。先后使用“环境检查”“检查数据”“预览计划”“开始运行”可逐步确认结果。
+主要输出：
 
-## 配置项
-
-`--config` 接受 YAML；下面是可直接加载的模型参数覆盖示例（省略字段沿用项目默认值）。保存为 `my.yaml` 后用 `& $cli inspect $inputDir --config .\my.yaml` 验证：
-
-```yaml
-windninja:
-  vegetation: trees
-  num_threads: 4
-  diurnal_winds: false
-  non_neutral_stability: false
-  alpha_stability: null
-  input_wind_height_m: null
-  station_radius_of_influence_km: -1
-  output_buffer_clipping_pct: 0
-  turbulence_output: false
-```
-
-以下为仓库 `config/defaults.yaml` 与程序内置默认配置的字段、默认值和含义。配置加载会合并默认值并构造配置对象，但不保证每个业务范围都在加载阶段检查；运行仍受下游库和 WindNinja 校验约束。
-
-| 配置路径 | 默认值 | 单位/作用与限制 |
-|---|---:|---|
-| `windninja_exe` | `~/.wind3d-ninja/windninja/3.12.2/bin/WindNinja_cli.exe` | 可执行文件路径；安装包会优先发现随包程序。`WINDNINJA_BIN`/`WINDNINJA_HOME` 可显式覆盖。 |
-| `sources.<source>.tz_offset_hours` | 各源 `8` | 无时区源时间相对 UTC 的小时偏移；显式时区时间按其时区解析。 |
-| `sources.<source>.station_prefix` | `WM`/`DAT`/`UAV`/`STA` | 观测无站名时生成站名的前缀。 |
-| `sources.windmaster.max_height_m` | `200` | WindMaster 纳入的最大观测高度，m。 |
-| `sources.windmaster.min_obtain_rate` | `0.8` | 最低 `DataObtainRate`，比例值。 |
-| `sources.dat.max_height_m` | `200` | DAT 最大观测高度，m。 |
-| `sources.dat.speed_divisor` | `100` | DAT 速度换算除数；原始值除以此数得到 m/s。 |
-| `sources.uav.agl_threshold_drop_m` | `-4` | UAV AGL 低于此值丢弃，m。 |
-| `sources.uav.agl_threshold_fix_m` | `0.1` | 未达到丢弃阈值的非正 AGL 修正为此高度，m；默认 [-4, 0] m 修正为 0.1 m。 |
-| `sources.uav.max_height_m` | `1000` | UAV 最大观测高度，m。 |
-| `sources.generic_station.max_height_m` | `1000` | 保留的高度上限配置，m；当前通用站点适配器未执行，需自行过滤。 |
-| `quality_rules.windmaster/dat.preferred_heights_m` | `[]` | 旧兼容项，不再筛除高度；所有其他质量有效的高度均传给 WindNinja。 |
-| `quality_rules.windmaster/dat.max_time_offset_seconds` | `120` | 目标分钟的匹配窗口，秒。 |
-| `dem.cache_dir` | `~/.wind3d-ninja/dem_cache` | 缓存目录。 |
-| `dem.source` | `srtm` | 自动下载 DEM 源；SRTM 下载覆盖纬度 -60 至 60 度。 |
-| `temperature.trust_source` | `false` | 是否采用有效范围内、确实由适配器读入的源温度；通用长表单位转换路径当前不读取温度列。 |
-| `temperature.valid_range_c` | `[-40, 50]` | 源温度有效区间，°C。 |
-| `temperature.configured_assumption_c` | `20` | 不信任/缺少源温度时写入站点文件的假定温度，°C。 |
-| `temperature.cloud_cover_assumption_pct` | `0` | 写入站点文件的云量假定，百分比。 |
-| `windninja.default_mesh_resolution_m` | `200` | 声明的默认网格尺寸，m；CLI 和 UI 当前通过各自参数输入，不自动读取此值。 |
-| `windninja.default_buffer_km` | `10` | 声明的默认区域外扩，km；CLI/UI 当前默认值由各自界面实现。 |
-| `windninja.vegetation` | `trees` | 主导下垫面枚举：`grass`、`brush`、`trees`。不是逐像元土地覆盖图。 |
-| `windninja.num_threads` | `4` | WindNinja 线程数。 |
-| `windninja.diurnal_winds` | `false` | 请求日变化坡谷风计算；该热力流程未在本项目流水线验证。 |
-| `windninja.non_neutral_stability` | `false` | 启用 WindNinja 3.12.2 的点初始化非中性稳定度分支；默认关闭以保持既有中性结果。 |
-| `windninja.alpha_stability` | `null` | 可选稳定度参数，只能与 `non_neutral_stability: true` 一起使用，且必须满足 `0 < alpha <= 5`。留空时由上游按站点新格式资料自动推断。 |
-| `windninja.input_wind_height_m` | `null` | 写配置时传给上游 `input_wind_height`；官方 CLI 3.12.2 的点初始化分支不应用它。不会改写观测文件的 `Height`；每条记录仍用原始 `observation.height_m`。 |
-| `windninja.station_radius_of_influence_km` | `-1` | 站点影响半径 km，写入每个 station CSV。`-1` 是无限影响半径，不是自动选择。官方 point initialization 要求至少一个负 radius 才能保证空间全覆盖；全部使用有限正半径可能留下未覆盖区。 |
-| `windninja.output_buffer_clipping_pct` | `0` | 输出边缘裁剪百分比。 |
-| `windninja.turbulence_output` | `false` | 旧配置字段；站点点初始化会拒绝启用。请使用 CLI/UI 的 `turbulence` 模式启动动量求解；非中性稳定度不等价于动量求解。 |
-| `output.default_output_dir_name` | `wind3d_output` | 默认结果目录名。 |
-| `output.netcdf_compression` | `true` | 是否对 NetCDF 风场变量启用 zlib level 4 压缩。 |
-| `output.netcdf_naming_format` | `Wind3D_{time}_{resolution}m_h{height:03d}m.nc` | 当前保留的配置字段；文件名由固定格式生成器产生，此字段尚未接入。 |
-| `output.kmz_colormap` | `viridis` | 当前保留字段；KMZ 沿用 WindNinja 原生输出，未应用此色带配置。 |
-
-`diurnal_winds`、`non_neutral_stability`、`alpha_stability` 是上游模型选项，不等价于已验证的热力建模能力。当前项目支持 `non_neutral_stability=true` 的点初始化路径，但不会把站点观测静默改为域平均或动量求解。`turbulence_output=true` 仍会在生成配置前明确拒绝，因为其要求的动量求解与当前 pointInitialization 工作流不兼容。
-
-## DEM、范围与高度语义
-
-程序依据站点点位和 buffer 计算需覆盖范围。`--bounds` 替代这个需求范围并用于 DEM 覆盖检查/下载请求，不是强制裁切最终计算域的输出选项。若输入 DEM 已覆盖需求范围，项目会直接使用整个已有 DEM（非投影 DEM 会先投影转换），不会按 bounds 裁小；若需下载 DEM，则下载所需区域并投影。`plan` 用于核对最终选中的 DEM 与边界。
-
-官方 CLI 将 `input_wind_height` 与 `output_wind_height` 定义为植被顶部以上的高度（above vegetation）。本项目把 `--height` 原样传给 `output_wind_height`，却在 NetCDF 中把 `height` 维标注为 AGL；未进行冠层高度换算。因此，林地等有明显植被高度的区域不能把该输出标签直接视为严格裸地 AGL。项目站点表以观测 `height_m` 原值写出并标注 meters，UAV 高度则是相对 DEM 地表计算的 AGL；观测仪器高度的参考面也应由使用者确认。
-
-输出高度与输入观测高度分别作用于模型输出和站点记录。例如 `--height 10 20 50` 会运行三个独立高度的风场作业，不会把所有观测高度改成这三个值。时间序列也是逐分钟独立计算，多个单高度 NetCDF 不等同于一个带垂直动量演化的完整三维瞬态模型。
-
-## 产品解释
-
-默认输出目录包含 `nc/`、可选 `kmz/`、`stations/`、`windninja/`、`dem/`、`observations.csv` 和 `manifest.json`。每个 NetCDF 对应一次真实单高度模型运行。核心变量 `U_wind`、`V_wind` 分别是向东、向北分量，单位 m/s：
-
-```text
-speed = sqrt(U_wind^2 + V_wind^2)
-气象风向来向 = (atan2(-U_wind, -V_wind) * 180 / pi + 360) % 360
-```
-
-静风时风向没有意义。文件还包含投影坐标 `x/y`、CRS 和 `lat/lon`。`x/y/crs` 是精确 GIS 定位依据；`lat/lon` 是投影网格中心线换算得到的 1D 近似轴，并非对每个格点重采样的规则经纬度网格。可选 KMZ 保留上游原生内容。
-
-`manifest.json` 记录输入、假设、选用 DEM、任务、命令和输出文件；它是复现实验的索引。温度默认采用配置假设值而不是信任源值，manifest 会记录该假设。`match_points=false`，所以点观测不会被强制拟合到观测风速；不能据此承诺模拟值与站点吻合到特定精度。
-
-## 常见问题
-
-| 现象 | 检查与处理 |
+| 文件/目录 | 内容 |
 |---|---|
-| 移动目录后找不到 WindNinja | 确认复制整个安装目录，然后执行 `doctor`；检查实际解析路径及旧 `WINDNINJA_BIN/WINDNINJA_HOME` 设置。 |
-| 检查不到有效观测 | 检查表头、时间、坐标、风速/风向、高度及数据源识别结果；先用最小长表排除格式问题。 |
-| 时间范围筛选结果为空 | 对照 `inspect` 的 UTC 时间；无时区 CLI 范围默认按 UTC+8 解释，可用带 `Z` 的 ISO 时间消除歧义。 |
-| DEM 不覆盖站点或无法下载 | 在输入目录放入覆盖需求范围的 DEM，或在 UI 显式选择；自动 SRTM 下载需网络且本实现纬度范围为 -60 至 60 度。 |
-| `pointInitialization cannot be combined...` | 站点模式保留 `non_neutral_stability`；关闭旧配置字段 `turbulence_output`。如需湍流产品，改用独立 `turbulence` 模式并提供背景风参数。 |
-| 单次运行耗时或占用内存很高 | 先预览任务数，减少时间/高度/分辨率组合或先用 200 m 网格；更小网格会增加计算量。 |
-| 结果域比 bounds 大 | 覆盖足够的已有 DEM 会全幅使用，bounds 不强制裁切；需要更小域时预先准备较小 DEM。 |
-| WindNinja 执行失败 | 检查输出目录下 `windninja/` 的该任务配置与日志，结合 `manifest.json` 定位；失败日志路径可随输出目录迁移。 |
+| `native_report.json` | 运行库、收敛、局部源项及独立验证 |
+| `nc/*.nc` | 原生 U/V/W、TKE、epsilon、nut，以及同网格/同高度原生基线 |
+| 原生 case 和日志 | 网格、求解检查点、源项配置及残差 |
+| UAV 验证表 | 基线与分析在实际观测三维位置的直接采样、覆盖率及误差 |
 
-## 官方依据与适用边界
+## 诊断与限制
 
-项目参数与初始化分支参照 [WindNinja 3.12.2 固定版本 CLI 源码](https://github.com/firelab/windninja/blob/94c20125a7e8850c543fc7b511469d2e27a97470/src/ninja/cli.cpp)；站点影响半径的负值语义参照同版本的 [pointInitialization.cpp](https://github.com/firelab/windninja/blob/94c20125a7e8850c543fc7b511469d2e27a97470/src/ninja/pointInitialization.cpp)。点初始化概念参考 [WindNinja Tutorial 3](https://ninjastorm.firelab.org/windninja/tutorials/WindNinja_tutorial3.pdf)；命令行和模型参数参考 [CLI Instructions](https://ninjastorm.firelab.org/windninja/tutorials/CLI_instructions.pdf)、[Tutorial 1](https://ninjastorm.firelab.org/windninja/tutorials/WindNinja_tutorial1.pdf)、[Tutorial 2](https://ninjastorm.firelab.org/windninja/tutorials/WindNinja_tutorial2.pdf)。在线教程会随上游版本更新（当前 Tutorial 3 示例为 WindNinja 4.0.0）；本项目兼容性以固定的 3.12.2 源码和本项目实现为准。上游通用能力不代表本项目 v1.0.4 的 pointInitialization 或 turbulence 路径均已实现或验证。
+界面中的依赖检查用于确认当前运行库路径。遇到缺少背景高度覆盖、未知高度定义或缺少兼容湍流观测，先修正资料与参数，再重跑；不要通过加大约束强度掩盖资料错误。
 
-本项目采用 MIT License。WindNinja 是独立上游软件，其随包再分发许可见仓库 `THIRD_PARTY_NOTICES/WindNinja-LICENSE.txt`。
+迁移验收记录随安装包交付，请以记录中的实际主机、运行模式和资料范围为准。运行成功不代表湍流精度已经提高；精度研究仍需实测 k/epsilon 或足够高频的三分量风统计、网格收敛及独站点留出验证。
+
+当前现场风向精度未通过验收：既有原生同化验证的圆周 MAE 为 103.384928°，仅 30/844 条记录通过时间、高度筛选，覆盖 11 个不同 XYZ 位置。软件按配置解释风向；地理方向、运动补偿、仪器偏角、时钟及高度基准必须有当次观测依据。不能据此认定数据损坏或软件无误，也不能把平均误差作为固定偏角扣除。详见[风向精度限制](wind_direction_calibration.md)。
+
+详细方法：[原生 RANS](native_rans_assimilation.md)、[逐站同化](station_assimilation.md)、[湍流研究](turbulence_research.md)。

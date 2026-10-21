@@ -11,6 +11,9 @@ from ..manifest.builder import normalize
 from ..pipeline.inspector import InputInspector
 from ..pipeline.planner import PipelinePlanner
 from ..pipeline.runner import PipelineRunner
+from ..pipeline.turbulence import TurbulenceBatchRunner
+from ..pipeline.assimilation import AssimilationBatchRunner
+from ..observations.instruments import InstrumentPolicy, RadarHeightReference, UavHeightReference, WindDirectionReference, WindSpeedUnit
 from ..utils.geometry import parse_bounds
 from ..utils.timezone import parse_explicit_time_utc, parse_time_range_utc
 from ..windninja.installer import install_windninja
@@ -274,4 +277,293 @@ def run(
     execute(
         ctx,
         operation,
+    )
+
+
+def research_options(function):
+    options = [
+        (("--reference-height",), dict(type=click.FloatRange(min=0, min_open=True), default=50.0, show_default=True, help="Common input profile height above vegetation (m).")),
+        (("--roughness",), dict(type=click.FloatRange(min=0, min_open=True), default=0.1, show_default=True, help="Roughness for station-profile log extrapolation (m).")),
+        (("--displacement-height",), dict(type=click.FloatRange(min=0), default=0.0, show_default=True)),
+        (("--allow-profile-extrapolation/--no-profile-extrapolation",), dict(default=False, show_default=True)),
+        (("--canopy-height",), dict(type=click.FloatRange(min=0), default=0.0, show_default=True)),
+        (("--windmaster-height-reference",), dict(type=click.Choice([item.value for item in RadarHeightReference]), default="agl", show_default=True)),
+        (("--windmaster-platform-agl",), dict(type=click.FloatRange(min=0), help="Radar platform height above local ground (m); added to vertical gates in platform_vertical_offset mode.")),
+        (("--uav-height-reference",), dict(type=click.Choice([item.value for item in UavHeightReference]), default="unknown", show_default=True)),
+        (("--uav-launch-position",), dict(nargs=2, type=float, metavar="LAT LON")),
+        (("--uav-launch-ground-altitude",), dict(type=float, help="Launch-ground elevation in the DEM vertical datum (m).")),
+        (("--uav-relative-agl-confirmed",), dict(is_flag=True)),
+        (("--uav-legacy-gps-is-launch-altitude-confirmed",), dict(is_flag=True)),
+        (("--windmaster-direction-reference",), dict(type=click.Choice(["from_true_north", "to_true_north"]), default="from_true_north")),
+        (("--uav-direction-reference",), dict(type=click.Choice(["from_true_north", "to_true_north"]), default="from_true_north")),
+    ]
+    for names, settings in reversed(options):
+        function = click.option(*names, **settings)(function)
+    return function
+
+
+def research_parameters(options: dict) -> dict:
+    position = options["uav_launch_position"]
+    policy = InstrumentPolicy(
+        windmaster_direction_reference=WindDirectionReference(options["windmaster_direction_reference"]),
+        uav_direction_reference=WindDirectionReference(options["uav_direction_reference"]),
+        windmaster_speed_unit=WindSpeedUnit.METERS_PER_SECOND,
+        uav_speed_unit=WindSpeedUnit.METERS_PER_SECOND,
+        windmaster_height_reference=RadarHeightReference(options["windmaster_height_reference"]),
+        windmaster_platform_agl_m=options["windmaster_platform_agl"],
+        windmaster_is_geographic_wind=True, windmaster_motion_compensated=True,
+        uav_is_geographic_wind=True, uav_motion_compensated=True,
+        uav_height_reference=UavHeightReference(options["uav_height_reference"]),
+        uav_relative_agl_confirmed=options["uav_relative_agl_confirmed"],
+        uav_legacy_gps_is_launch_altitude_confirmed=options["uav_legacy_gps_is_launch_altitude_confirmed"],
+        uav_launch_lat=position[0] if position else None,
+        uav_launch_lon=position[1] if position else None,
+        uav_launch_location_confirmed=position is not None,
+        uav_launch_ground_altitude_m=options["uav_launch_ground_altitude"],
+        canopy_height_m=options["canopy_height"],
+    )
+    return dict(instrument_policy=policy, reference_height_m=options["reference_height"],
+                roughness_m=options["roughness"], displacement_height_m=options["displacement_height"],
+                allow_profile_extrapolation=options["allow_profile_extrapolation"])
+
+
+@cli.command(help="Run the independent WindNinja RANS turbulence batch workflow.")
+@research_options
+@click.argument("input_dir", type=click.Path(path_type=Path, exists=True, file_okay=False))
+@click.option("--height", "heights", "-h", multiple=True, required=True, type=click.IntRange(min=1))
+@click.argument("additional_heights", nargs=-1, type=click.IntRange(min=1), metavar="[MORE_HEIGHTS]...")
+@click.option("--output", "output_dir", "-o", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--resolution", "mesh_resolutions", "-r", multiple=True, default=(200,), show_default=True, type=click.IntRange(min=1))
+@click.option("--buffer", "buffer_km", "-b", default=10.0, show_default=True, type=click.FloatRange(min=0.0))
+@click.option("--bounds", nargs=4, type=float, metavar="MIN_LAT MAX_LAT MIN_LON MAX_LON")
+@click.option("--time-range", nargs=2, type=str, metavar="START END")
+@click.option("--max-cases", type=click.IntRange(min=1), default=1, show_default=True)
+@click.option("--validation-window", type=click.IntRange(min=0), default=120, show_default=True, help="Maximum UAV time offset in seconds.")
+@click.option("--validation-height-tolerance", type=click.FloatRange(min=0), default=10.0, show_default=True, help="Maximum UAV height offset in meters.")
+@click.option("--background-max-height", type=click.FloatRange(min=0, min_open=True), default=200.0, show_default=True, help="Maximum fixed WindMaster gate height in meters.")
+@click.option("--product", "selected_product", type=str)
+@click.option("--dem", "dem_override", type=click.Path(path_type=Path, exists=True, dir_okay=False), help="Use a DEM covering the requested domain.")
+@click.option("--non-neutral/--neutral", default=False, show_default=True)
+@click.option("--kmz/--no-kmz", default=True, show_default=True)
+@click.option("--config", "config_path", type=click.Path(path_type=Path, dir_okay=False))
+@click.pass_context
+def turbulence(
+    ctx: click.Context,
+    input_dir: Path,
+    heights: tuple[int, ...],
+    additional_heights: tuple[int, ...],
+    output_dir: Path | None,
+    mesh_resolutions: tuple[int, ...],
+    buffer_km: float,
+    bounds: tuple[float, float, float, float] | None,
+    time_range: tuple[str, str] | None,
+    max_cases: int,
+    validation_window: int,
+    validation_height_tolerance: float,
+    background_max_height: float,
+    selected_product: str | None,
+    dem_override: Path | None,
+    non_neutral: bool,
+    kmz: bool,
+    config_path: Path | None,
+    **profile_options,
+) -> None:
+    config = load_config(config_path)
+    destination = output_dir or input_dir / "turbulence_output"
+    execute(
+        ctx,
+        lambda: TurbulenceBatchRunner(config).run(
+            input_dir,
+            destination,
+            combine_heights(heights, additional_heights),
+            list(mesh_resolutions),
+            buffer_km,
+            parse_bounds(bounds),
+            kmz,
+            time_range=parse_time_range_utc(time_range, default_time_offset(config)),
+            max_cases=max_cases,
+            validation_window_seconds=validation_window,
+            validation_height_tolerance_m=validation_height_tolerance,
+            background_max_height_m=background_max_height,
+            selected_product=selected_product,
+            non_neutral_stability=non_neutral,
+            dem_override=dem_override,
+            **research_parameters(profile_options),
+        ).as_dict(),
+    )
+
+
+@cli.command(help="Run station optimal-interpolation analysis on a WindNinja RANS background.")
+@research_options
+@click.argument("input_dir", type=click.Path(path_type=Path, exists=True, file_okay=False))
+@click.option("--height", "heights", "-h", multiple=True, required=True, type=click.IntRange(min=1))
+@click.argument("additional_heights", nargs=-1, type=click.IntRange(min=1), metavar="[MORE_HEIGHTS]...")
+@click.option("--output", "output_dir", "-o", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--resolution", "mesh_resolutions", "-r", multiple=True, default=(200,), show_default=True, type=click.IntRange(min=1))
+@click.option("--buffer", "buffer_km", "-b", default=10.0, show_default=True, type=click.FloatRange(min=0.0))
+@click.option("--bounds", nargs=4, type=float, metavar="MIN_LAT MAX_LAT MIN_LON MAX_LON")
+@click.option("--time-range", nargs=2, type=str, metavar="START END")
+@click.option("--max-cases", type=click.IntRange(min=1), default=1, show_default=True)
+@click.option("--validation-window", type=click.IntRange(min=0), default=120, show_default=True, help="Maximum UAV time offset in seconds.")
+@click.option("--validation-height-tolerance", type=click.FloatRange(min=0), default=10.0, show_default=True, help="Maximum UAV height offset in meters.")
+@click.option("--background-max-height", type=click.FloatRange(min=0, min_open=True), default=200.0, show_default=True, help="Maximum fixed WindMaster gate height in meters.")
+@click.option("--product", "selected_product", type=str)
+@click.option("--dem", "dem_override", type=click.Path(path_type=Path, exists=True, dir_okay=False), help="Use a DEM covering the requested domain.")
+@click.option("--non-neutral/--neutral", default=False, show_default=True)
+@click.option("--kmz/--no-kmz", default=True, show_default=True)
+@click.option("--config", "config_path", type=click.Path(path_type=Path, dir_okay=False))
+@click.option("--station-observations", type=click.Path(path_type=Path, exists=True, dir_okay=False), help="CSV of independent fixed-station observations.")
+@click.option("--horizontal-length-scale", default=1000.0, show_default=True, type=click.FloatRange(min=0, min_open=True), help="Horizontal correlation length (m).")
+@click.option("--background-wind-sigma", default=2.0, show_default=True, type=click.FloatRange(min=0, min_open=True), help="Background wind standard deviation (m/s).")
+@click.option("--observation-wind-sigma", default=0.5, show_default=True, type=click.FloatRange(min=0, min_open=True), help="Default observation wind standard deviation (m/s).")
+@click.option("--vertical-length-scale", default=30.0, show_default=True, type=click.FloatRange(min=0, min_open=True), help="Vertical correlation length (m).")
+@click.pass_context
+def assimilation(
+    ctx: click.Context,
+    input_dir: Path,
+    heights: tuple[int, ...],
+    additional_heights: tuple[int, ...],
+    output_dir: Path | None,
+    mesh_resolutions: tuple[int, ...],
+    buffer_km: float,
+    bounds: tuple[float, float, float, float] | None,
+    time_range: tuple[str, str] | None,
+    max_cases: int,
+    validation_window: int,
+    validation_height_tolerance: float,
+    background_max_height: float,
+    selected_product: str | None,
+    dem_override: Path | None,
+    non_neutral: bool,
+    kmz: bool,
+    config_path: Path | None,
+    station_observations: Path | None,
+    horizontal_length_scale: float,
+    background_wind_sigma: float,
+    observation_wind_sigma: float,
+    vertical_length_scale: float,
+    **profile_options,
+) -> None:
+    config = load_config(config_path)
+    destination = output_dir or input_dir / "assimilation_output"
+    execute(
+        ctx,
+        lambda: AssimilationBatchRunner(config).run(
+            input_dir,
+            destination,
+            combine_heights(heights, additional_heights),
+            list(mesh_resolutions),
+            buffer_km,
+            parse_bounds(bounds),
+            kmz,
+            station_observations=station_observations,
+            horizontal_length_scale_m=horizontal_length_scale,
+            background_wind_sigma_ms=background_wind_sigma,
+            observation_wind_sigma_ms=observation_wind_sigma,
+            vertical_length_scale_m=vertical_length_scale,
+            time_range=parse_time_range_utc(time_range, default_time_offset(config)),
+            max_cases=max_cases,
+            validation_window_seconds=validation_window,
+            validation_height_tolerance_m=validation_height_tolerance,
+            background_max_height_m=background_max_height,
+            selected_product=selected_product,
+            non_neutral_stability=non_neutral,
+            dem_override=dem_override,
+            **research_parameters(profile_options),
+        ).as_dict(),
+    )
+
+
+@cli.command("native-assimilation", help="Run Windows native RANS coupled station assimilation.")
+@research_options
+@click.argument("input_dir", type=click.Path(path_type=Path, exists=True, file_okay=False))
+@click.option("--height", "heights", "-h", multiple=True, required=True, type=click.IntRange(min=1))
+@click.argument("additional_heights", nargs=-1, type=click.IntRange(min=1), metavar="[MORE_HEIGHTS]...")
+@click.option("--output", "output_dir", "-o", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--resolution", "mesh_resolutions", "-r", multiple=True, default=(200,), show_default=True, type=click.IntRange(min=1))
+@click.option("--buffer", "buffer_km", "-b", default=10.0, show_default=True, type=click.FloatRange(min=0.0))
+@click.option("--bounds", nargs=4, type=float, metavar="MIN_LAT MAX_LAT MIN_LON MAX_LON")
+@click.option("--time-range", nargs=2, type=str, metavar="START END")
+@click.option("--max-cases", type=click.IntRange(min=1), default=1, show_default=True)
+@click.option("--validation-window", type=click.IntRange(min=0), default=120, show_default=True, help="Maximum UAV time offset in seconds.")
+@click.option("--validation-height-tolerance", type=click.FloatRange(min=0), default=10.0, show_default=True, help="Maximum UAV height offset in meters.")
+@click.option("--background-max-height", type=click.FloatRange(min=0, min_open=True), default=200.0, show_default=True, help="Maximum fixed WindMaster gate height in meters.")
+@click.option("--product", "selected_product", type=str)
+@click.option("--dem", "dem_override", type=click.Path(path_type=Path, exists=True, dir_okay=False), help="Use a DEM covering the requested domain.")
+@click.option("--non-neutral/--neutral", default=False, show_default=True)
+@click.option("--kmz/--no-kmz", default=True, show_default=True)
+@click.option("--config", "config_path", type=click.Path(path_type=Path, dir_okay=False))
+@click.option("--station-observations", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True, help="CSV with k and epsilon or mixing length.")
+@click.option("--native-runtime", type=click.Path(path_type=Path, exists=True, file_okay=False))
+@click.option("--horizontal-radius-m", type=click.FloatRange(min=0, min_open=True), default=300.0, show_default=True)
+@click.option("--vertical-radius-m", type=click.FloatRange(min=0, min_open=True), default=50.0, show_default=True)
+@click.option("--velocity-relaxation-seconds", type=click.FloatRange(min=0, min_open=True), default=10.0, show_default=True)
+@click.option("--tke-relaxation-seconds", type=click.FloatRange(min=0, min_open=True), default=10.0, show_default=True)
+@click.option("--epsilon-relaxation-seconds", type=click.FloatRange(min=0, min_open=True), default=10.0, show_default=True)
+@click.option("--max-iterations", type=click.IntRange(min=51), default=1000, show_default=True)
+@click.option("--residual-tolerance", type=click.FloatRange(min=0, min_open=True), default=1e-05, show_default=True)
+@click.pass_context
+def native_assimilation(
+    ctx: click.Context,
+    input_dir: Path,
+    heights: tuple[int, ...],
+    additional_heights: tuple[int, ...],
+    output_dir: Path | None,
+    mesh_resolutions: tuple[int, ...],
+    buffer_km: float,
+    bounds: tuple[float, float, float, float] | None,
+    time_range: tuple[str, str] | None,
+    max_cases: int,
+    validation_window: int,
+    validation_height_tolerance: float,
+    background_max_height: float,
+    selected_product: str | None,
+    dem_override: Path | None,
+    non_neutral: bool,
+    kmz: bool,
+    config_path: Path | None,
+    station_observations: Path | None,
+    native_runtime: Path | None,
+    horizontal_radius_m: float,
+    vertical_radius_m: float,
+    velocity_relaxation_seconds: float,
+    tke_relaxation_seconds: float,
+    epsilon_relaxation_seconds: float,
+    max_iterations: int,
+    residual_tolerance: float,
+    **profile_options,
+) -> None:
+    from ..pipeline.native_assimilation import NativeCoupledBatchRunner
+
+    config = load_config(config_path)
+    destination = output_dir or input_dir / "native_output"
+    execute(
+        ctx,
+        lambda: NativeCoupledBatchRunner(config).run(
+            input_dir,
+            destination,
+            combine_heights(heights, additional_heights),
+            list(mesh_resolutions),
+            buffer_km,
+            parse_bounds(bounds),
+            kmz,
+            station_observations=station_observations,
+            native_runtime=native_runtime,
+            horizontal_radius_m=horizontal_radius_m,
+            vertical_radius_m=vertical_radius_m,
+            velocity_relaxation_seconds=velocity_relaxation_seconds,
+            tke_relaxation_seconds=tke_relaxation_seconds,
+            epsilon_relaxation_seconds=epsilon_relaxation_seconds,
+            max_iterations=max_iterations,
+            residual_tolerance=residual_tolerance,
+            time_range=parse_time_range_utc(time_range, default_time_offset(config)),
+            max_cases=max_cases,
+            validation_window_seconds=validation_window,
+            validation_height_tolerance_m=validation_height_tolerance,
+            background_max_height_m=background_max_height,
+            selected_product=selected_product,
+            non_neutral_stability=non_neutral,
+            dem_override=dem_override,
+            **research_parameters(profile_options),
+        ).as_dict(),
     )

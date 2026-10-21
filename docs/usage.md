@@ -1,142 +1,33 @@
-# 使用指南
+# 源码运行与 Windows 打包
 
-## 输入文件夹
+用户直接安装 `Wind3D-Ninja-Setup-1.1.9.exe`，界面操作见 [使用说明](user_guide_zh.md)。
 
-把以下文件放进同一个输入目录，文件名不需要固定：
+## 源码运行
 
-- `*.zip`：WindMaster 数据。
-- `*.dat`：超声波测风仪数据。
-- `*.xls`、`*.xlsx`：UAV 数据。
-- `*.tif`、`*.tiff`：可选 DEM。
-
-程序会递归扫描输入目录。DEM 若存在且覆盖观测范围则优先使用；若不存在或覆盖不足，则自动下载并缓存 SRTM DEM。
-
-UAV 文件中的 GPS 当前高度和对地高度与 DEM 高程共同计算 AGL：`(GPS 当前高度 + 对地高度) - DEM 高程`。结果小于 `-4 m` 的记录丢弃，`-4 m` 到 `0 m` 的记录修正为 `0.1 m`，大于 `0 m` 时保留计算值。DEM 在 `plan` 阶段优先匹配或自动下载。
-
-## Git Bash 准备
-
-```bash
-git clone https://github.com/maomao3334/wind3d-ninja.git
-cd wind3d-ninja
-py -3.11 -m pip install -e .
-wind3d-ninja doctor --install
+```powershell
+py -3.11 -m pip install -e ".[ui,test]"
+wind3d-ninja-ui
 wind3d-ninja --help
 ```
 
-`doctor --install` 会下载并校验固定的 WindNinja `3.12.2` Windows 运行时。默认安装到 `~/.wind3d-ninja/windninja/3.12.2/`。官方安装器需要管理员批准，Windows 弹出 UAC 对话框时点击“是”即可。若要放到其他磁盘，先在 Git Bash 中设置：
+命令行支持 `inspect`、`plan`、`run`、`turbulence`、`assimilation`、`native-assimilation`。用各命令的 `--help` 查看完整参数。兼容此前的 `run --mode turbulence` 手动背景方式：
 
-```bash
-export WINDNINJA_HOME="/path/to/WindNinja-3.12.2"
-wind3d-ninja doctor --install
+```powershell
+.\Wind3D-cli.exe run D:\wind\input --height 50 --resolution 200 --mode turbulence --background-speed-ms 8 --background-direction-deg 270 --background-height-m 50 --simulation-time 2024-04-03T08:06:00Z --bounds 25.0 25.1 102.3 102.5 --output D:\wind\output
 ```
 
-安装包本身不依赖开发机绝对路径。UI/CLI 会从当前程序目录的上一级查找 `windninja/bin/WindNinja_cli.exe`，所以必须把 `ui`、`cli` 和 `windninja` 三个目录作为一个整体移动；若旧的 `WINDNINJA_BIN` 或 `WINDNINJA_HOME` 已失效，会自动回退到当前安装包内置运行时。运行时配置文件中出现的绝对路径只是按本机输入/输出目录临时生成，不会写死在源码或安装包中。
+逐站及原生同化的仪器/高度、CSV 和输出约定见 [逐站说明](station_assimilation.md) 与 [原生说明](native_rans_assimilation.md)。
 
-## 检查输入
+## 打包同一个软件
 
-```bash
-wind3d-ninja doctor
-wind3d-ninja inspect ./input_data
+在 Windows 上使用已准备好的 WindNinja 3.12.2 和原生 OpenFOAM 8 运行库：
+
+```powershell
+py -3.11 -m pip install pyinstaller
+py -3.11 scripts/package_windows_app.py --windninja-root D:/tools/WindNinja-3.12.2 --openfoam-root D:/runtime/openfoam8 --native-source-archive D:/runtime/native-corresponding-source.tar.gz
+powershell -NoProfile -File packaging/build_installer.ps1 -IsccPath "D:/tools\InnoSetup\ISCC.exe"
 ```
 
-`inspect` 只读取和汇总输入，不运行 WindNinja，也不要求用户输入时间。
+默认冻结目录为 `dist/Wind3D`，安装文件为 `installer_output/Wind3D-Ninja-Setup-1.1.9.exe`。Qt 是默认图形界面；旧 Tk 构建 spec 保留供历史参考，不用于该安装包。
 
-## 查看自动计划
-
-```bash
-wind3d-ninja plan ./input_data --height 10 20 50
-```
-
-时间轴从经过 DEM/UAV 高度筛选的有效观测中自动提取并按 UTC 分钟去重。`plan` 会先解析或下载 DEM，再列出目标时次、输出高度、分辨率、覆盖范围、实际 DEM 路径和目标文件名。
-
-同时规划多个分辨率：
-
-```bash
-wind3d-ninja plan ./input_data --height 10 20 50 \
-  --resolution 50 \
-  --resolution 100 \
-  --resolution 200
-```
-
-## 正式运行
-
-最简命令：
-
-```bash
-wind3d-ninja run ./input_data --height 10 20 50
-```
-
-它会自动处理全部观测时次，默认分辨率为 `200 m`，并同时生成 NetCDF 和 KMZ。默认输出到：
-
-```text
-./input_data/wind3d_output
-```
-
-运行期间会实时显示 `[当前任务/总任务]`、目标 UTC 时间、高度、分辨率，以及 WindNinja 的求解百分比和每阶段日志。
-
-### 自定义时间区间
-
-不写时间区间时处理全部自动提取的观测时次。以下命令只输出 UTC+8 的 `2024-04-03 16:16` 到 `16:30`，区间两端都包含：
-
-```bash
-wind3d-ninja run ./input_data --height 10 20 50 \
-  --resolution 50 \
-  --time-range "2024-04-03 16:16" "2024-04-03 16:30"
-```
-
-无时区时间使用数据源配置的时区偏移，当前默认 UTC+8。显式 UTC 时间也可以写成：
-
-```bash
---time-range "2024-04-03T08:16:00Z" "2024-04-03T08:30:00Z"
-```
-
-## UI 时间选择
-
-桌面 UI 不需要手动输入时间。选择输入数据文件夹后，点击“刷新可用时间”，程序会从 WindMaster、DAT、UAV 和通用站点文件中读取已有观测时刻；开始时间和结束时间下拉框只显示这些实际存在的时刻，显示为 UTC+8，运行时自动转换为 UTC。
-
-多分辨率运行：
-
-```bash
-wind3d-ninja run ./input_data --height 10 20 50 \
-  --resolution 50 \
-  --resolution 100 \
-  --resolution 200
-```
-
-自定义输出位置和覆盖范围：
-
-```bash
-wind3d-ninja run ./input_data --height 10 20 50 \
-  --resolution 100 \
-  --output ./results \
-  --bounds 24.9 25.1 102.3 102.5
-```
-
-`--bounds` 四个值依次为：`最小纬度 最大纬度 最小经度 最大经度`。
-
-如果不写 `--bounds`，程序根据全部观测坐标和 `--buffer` 自动计算覆盖范围：
-
-```bash
-wind3d-ninja run ./input_data --height 10 20 50 --buffer 10
-```
-
-## 输出
-
-```text
-wind3d_output/
-├── nc/Wind3D_20240403T081600Z_100m_h010m.nc
-├── nc/Wind3D_20240403T081600Z_100m_h020m.nc
-├── nc/Wind3D_20240403T081600Z_100m_h050m.nc
-├── kmz/Wind3D_20240403T081600Z_100m_h010m.kmz
-├── kmz/Wind3D_20240403T081600Z_100m_h020m.kmz
-├── kmz/Wind3D_20240403T081600Z_100m_h050m.kmz
-├── stations/<UTC时间>/<高度>/
-├── windninja/<UTC时间>/<高度>/<分辨率>/
-├── dem/
-├── observations.csv
-└── manifest.json
-```
-
-每个 NetCDF 文件只对应一个真实 WindNinja 运行时次、一个高度和一个分辨率。文件名中的时间统一使用 UTC。
-
-NetCDF 只保存 `U_wind` 和 `V_wind`，不重复保存风速和风向。KMZ 原样复制 WindNinja 的原生输出并采用标准文件名。KMZ 默认开启，可用 `--no-kmz` 关闭。
+原生 DLL 的重建/对应源码说明在原生方法文档与 scripts 内；最终用户无需此开发工具链。许可证、文档和对应源码必须随分发包保留。

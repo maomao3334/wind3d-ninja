@@ -35,6 +35,8 @@ class DataScanner:
         for path in sorted(self.input_dir.rglob("*")):
             if not path.is_file() or any(part.lower() in self._ignored_dirs for part in path.parts):
                 continue
+            if any(part.lower() in {"level0", "level1", "level2", "logs"} for part in path.parts):
+                continue
             suffix = path.suffix.lower()
             if suffix == ".zip":
                 found["windmaster"].append(path)

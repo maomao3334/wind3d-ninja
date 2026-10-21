@@ -61,6 +61,28 @@ def test_bundled_runtime_root_is_relative_to_current_executable(tmp_path: Path, 
 
     assert installer.bundled_runtime_executable() == bundled
     assert installer.default_runtime_root() == install_root / "windninja"
+def test_frozen_runtime_discovery_follows_relocated_executable(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("WINDNINJA_HOME", raising=False)
+    monkeypatch.setattr(installer.sys, "frozen", True, raising=False)
+    for directory in (tmp_path / "original", tmp_path / "relocated app"):
+        monkeypatch.setattr(installer.sys, "executable", str(directory / "Wind3D.exe"))
+        assert installer.default_runtime_executable() == (
+            directory / "runtime" / "windninja" / installer.WINDNINJA_VERSION / "bin" / "WindNinja_cli.exe"
+        )
+
+
+def test_environment_override_precedes_frozen_runtime(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(installer.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(installer.sys, "executable", str(tmp_path / "app" / "Wind3D.exe"))
+    monkeypatch.setenv("WINDNINJA_HOME", str(tmp_path / "custom runtime"))
+    assert installer.default_runtime_root() == tmp_path / "custom runtime"
+
+
+def test_unfrozen_runtime_stays_in_user_home(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("WINDNINJA_HOME", raising=False)
+    monkeypatch.setattr(installer.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(installer.Path, "home", lambda: tmp_path)
+    assert installer.default_runtime_root() == tmp_path / ".wind3d-ninja" / "windninja" / installer.WINDNINJA_VERSION
 
 
 def test_install_windninja_downloads_verifies_and_installs(tmp_path: Path, monkeypatch) -> None:
@@ -115,3 +137,14 @@ def test_run_installer_requests_uac_when_windows_requires_elevation(
     assert calls[0][1:] == ["/S", f"/D={tmp_path / 'runtime'}"]
     assert calls[1][0] == "powershell.exe"
     assert any("UAC" in message for message in messages)
+
+
+def test_stale_machine_override_uses_unified_runtime(tmp_path: Path, monkeypatch) -> None:
+    executable = tmp_path / "app" / "Wind3D.exe"
+    bundled = executable.parent / "runtime" / "windninja" / installer.WINDNINJA_VERSION / "bin" / "WindNinja_cli.exe"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_bytes(b"fixture-cli")
+    monkeypatch.setattr(installer.sys, "executable", str(executable))
+    monkeypatch.setenv("WINDNINJA_BIN", str(tmp_path / "old-machine" / "WindNinja_cli.exe"))
+    monkeypatch.setenv("WINDNINJA_HOME", str(tmp_path / "old-machine"))
+    assert load_config().windninja_exe == bundled

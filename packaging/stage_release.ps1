@@ -1,79 +1,66 @@
 param(
-    [string]$WindNinjaSource = $env:WINDNINJA_SOURCE
+    [string]$AppDir,
+    [string]$StageDir
 )
 
 $ErrorActionPreference = "Stop"
-
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$UiSource = Join-Path $ProjectRoot "release\wind3d-ninja-ui-portable"
-$CliSource = Join-Path $ProjectRoot "release\wind3d-ninja-cli"
-$Stage = Join-Path $ProjectRoot "installer_stage"
-
-if ([string]::IsNullOrWhiteSpace($WindNinjaSource)) {
-    throw "Set WINDNINJA_SOURCE to the local WindNinja 3.12.2 directory before staging a release."
+if ([string]::IsNullOrWhiteSpace($AppDir)) {
+    $AppDir = Join-Path $ProjectRoot "dist\Wind3D"
 }
-if (-not (Test-Path -LiteralPath $WindNinjaSource -PathType Container)) {
-    throw "WindNinja source directory was not found: $WindNinjaSource"
+if ([string]::IsNullOrWhiteSpace($StageDir)) {
+    $StageDir = Join-Path $ProjectRoot "installer_stage"
 }
-$WindNinjaSource = (Resolve-Path -LiteralPath $WindNinjaSource).Path
 
-$RequiredFiles = @(
-    (Join-Path $UiSource "wind3d-ninja-ui.exe"),
-    (Join-Path $CliSource "wind3d-ninja.exe"),
-    (Join-Path $WindNinjaSource "bin\WindNinja_cli.exe")
+$AppDir = (Resolve-Path -LiteralPath $AppDir).Path
+$StageDir = [IO.Path]::GetFullPath($StageDir)
+$Required = @(
+    "Wind3D.exe",
+    "Wind3D-cli.exe",
+    "_internal\config\defaults.yaml",
+    "runtime\windninja\3.12.2\bin\WindNinja_cli.exe",
+    "runtime\openfoam8\native_runtime.json",
+    "native-corresponding-source.tar.gz",
+    "licenses\Wind3D-LICENSE.txt",
+    "docs\user_guide_zh.md",
+    "portable_app.json"
 )
-foreach ($RequiredFile in $RequiredFiles) {
-    if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
-        throw "Required release file is missing: $RequiredFile"
+foreach ($RelativePath in $Required) {
+    $Path = Join-Path $AppDir $RelativePath
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Frozen application is missing required installer content: $Path"
     }
 }
 
-if (Test-Path -LiteralPath $Stage) {
-    Remove-Item -LiteralPath $Stage -Recurse -Force
-}
-New-Item -ItemType Directory -Path $Stage | Out-Null
-
-Copy-Item -LiteralPath $UiSource -Destination (Join-Path $Stage "ui") -Recurse
-Copy-Item -LiteralPath $CliSource -Destination (Join-Path $Stage "cli") -Recurse
-Copy-Item -LiteralPath $WindNinjaSource -Destination (Join-Path $Stage "windninja") -Recurse
-New-Item -ItemType Directory -Path (Join-Path $Stage "docs") | Out-Null
-Copy-Item -LiteralPath (Join-Path $ProjectRoot "docs\user_guide_zh.md") -Destination (Join-Path $Stage "docs\user_guide_zh.md")
-
-# Keep the installer-facing UI name stable even though PyInstaller's portable
-# spec uses a lowercase executable name.
-$stagedUi = Join-Path $Stage "ui\wind3d-ninja-ui.exe"
-$installerUi = Join-Path $Stage "ui\Wind3D-Ninja.exe"
-if (Test-Path -LiteralPath $stagedUi -PathType Leaf) {
-    Move-Item -LiteralPath $stagedUi -Destination $installerUi -Force
+$PortableManifest = Get-Content -LiteralPath (Join-Path $AppDir "portable_app.json") -Raw | ConvertFrom-Json
+if ($PortableManifest.platform -ne "windows-native" -or
+    $PortableManifest.requires_wsl -ne $false -or
+    $PortableManifest.requires_system_python -ne $false -or
+    $PortableManifest.ui -ne "Wind3D.exe" -or
+    $PortableManifest.cli -ne "Wind3D-cli.exe" -or
+    $PortableManifest.local_default_config_included -ne $true) {
+    throw "portable_app.json does not describe the expected self-contained Windows Wind3D application."
 }
 
-$Readme = @(
-    "Wind3D Ninja 1.0.4"
-    "===================="
-    ""
-    "Included:"
-    "- Wind3D Ninja desktop UI"
-    "- wind3d-ninja command line tool"
-    "- WindNinja 3.12.2 runtime"
-    ""
-    "Quick start:"
-    "1. Open Wind3D Ninja from the desktop or Start menu."
-    "2. Choose the input data folder."
-    "3. Enter output heights, for example: 10 20 50."
-    "4. Enter resolutions, for example: 50 100 200."
-    "5. Leave DEM empty to match a local DEM first and download one if needed."
-    "6. Run doctor, inspect, plan, then run."
-    ""
-    "No separate Python or WindNinja installation is required."
-) -join [Environment]::NewLine
-Set-Content -LiteralPath (Join-Path $Stage "README-FIRST.txt") -Value $Readme -Encoding UTF8
+$WorkspacePrefix = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+if (-not $StageDir.StartsWith($WorkspacePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Installer staging must stay inside this project workspace."
+}
+if (Test-Path -LiteralPath $StageDir) {
+    Remove-Item -LiteralPath $StageDir -Recurse -Force
+}
+New-Item -ItemType Directory -Path $StageDir | Out-Null
+Copy-Item -LiteralPath $AppDir -Destination $StageDir -Recurse
+$StagedApp = Join-Path $StageDir "Wind3D"
 
-$Files = Get-ChildItem -LiteralPath $Stage -Recurse -File
+$Files = Get-ChildItem -LiteralPath $StagedApp -Recurse -File
 [pscustomobject]@{
-    Stage = $Stage
+    Stage = $StagedApp
     Files = $Files.Count
     Bytes = ($Files | Measure-Object -Property Length -Sum).Sum
-    UiExecutable = Test-Path -LiteralPath (Join-Path $Stage "ui\Wind3D-Ninja.exe")
-    CliExecutable = Test-Path -LiteralPath (Join-Path $Stage "cli\wind3d-ninja.exe")
-    WindNinjaExecutable = Test-Path -LiteralPath (Join-Path $Stage "windninja\bin\WindNinja_cli.exe")
-}
+    GuiExecutable = Test-Path -LiteralPath (Join-Path $StagedApp "Wind3D.exe")
+    CliExecutable = Test-Path -LiteralPath (Join-Path $StagedApp "Wind3D-cli.exe")
+    WindNinjaExecutable = Test-Path -LiteralPath (Join-Path $StagedApp "runtime\windninja\3.12.2\bin\WindNinja_cli.exe")
+    NativeRuntime = Test-Path -LiteralPath (Join-Path $StagedApp "runtime\openfoam8\native_runtime.json")
+    SourceArchive = Test-Path -LiteralPath (Join-Path $StagedApp "native-corresponding-source.tar.gz")
+} | Format-List

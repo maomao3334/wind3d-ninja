@@ -5,6 +5,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .process import external_popen
+
 
 @dataclass(frozen=True)
 class WindNinjaResult:
@@ -33,7 +35,7 @@ class WindNinjaRunner:
         else:
             command = (str(self.executable), str(config_file.resolve()))
         log_file = work_dir / "windninja.log"
-        process = subprocess.Popen(
+        process = external_popen(
             command,
             cwd=work_dir,
             stdout=subprocess.PIPE,
@@ -42,6 +44,7 @@ class WindNinjaRunner:
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
         try:
             with log_file.open("w", encoding="utf-8") as log:
