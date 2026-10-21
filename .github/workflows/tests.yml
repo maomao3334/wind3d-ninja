@@ -20,7 +20,7 @@ jobs:
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[test]"
+          python -m pip install -e ".[ui,test]"
 
       - name: Run tests
         run: python -m pytest
